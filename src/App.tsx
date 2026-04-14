@@ -112,18 +112,20 @@ export default function App() {
         fastForwardRef.current = null;
       }
 
-      // Auto-slowdown during cleaning: drop to Fast (60x) when janitor enters,
-      // restore when janitor leaves. Only triggers from Lightning (300x) speed.
-      for (const e of newEvents) {
-        if (e.type === 'CLEANING_STARTED' && !cleaningSlowdownRef.current && result.speedMultiplier >= 300) {
-          cleaningSlowdownRef.current = { restoreSpeed: result.speedMultiplier };
-          return { ...result, speedMultiplier: 60 };
-        }
-        if (e.type === 'CLEANING_COMPLETED' && cleaningSlowdownRef.current) {
-          const restore = cleaningSlowdownRef.current.restoreSpeed;
-          cleaningSlowdownRef.current = null;
-          return { ...result, speedMultiplier: restore };
-        }
+      // Auto-slowdown during cleaning: check isBeingCleaned flag (not events)
+      // to avoid React double-invocation issues.
+      const anyCleaning = result.restroomStatuses.some(s => s.isBeingCleaned);
+
+      if (anyCleaning && !cleaningSlowdownRef.current && result.speedMultiplier >= 300) {
+        // Janitor just started cleaning — slow down to Fast
+        cleaningSlowdownRef.current = { restoreSpeed: result.speedMultiplier };
+        return { ...result, speedMultiplier: 60 };
+      }
+      if (!anyCleaning && cleaningSlowdownRef.current) {
+        // Cleaning finished — restore speed
+        const restore = cleaningSlowdownRef.current.restoreSpeed;
+        cleaningSlowdownRef.current = null;
+        return { ...result, speedMultiplier: restore };
       }
 
       return result;
