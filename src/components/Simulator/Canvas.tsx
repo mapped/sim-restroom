@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useMemo } from 'react';
-import { SimState, Room, RoomType, NPC, RestroomStatus } from '@/types/sim';
+import { SimState, Room, RoomType, NPC, RestroomStatus, RestroomPrediction } from '@/types/sim';
 import { JANITORIAL_RULES } from '@/simulation/engine';
 
 interface RendererProps {
@@ -310,6 +310,38 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
 
         ctx.fillStyle = '#1e293b';
         ctx.fillText(room.label.toUpperCase(), 0, 0);
+
+        // Prediction ETA for restrooms
+        const prediction = state.predictions?.find(p => p.roomId === room.id);
+        if (prediction?.predictedThresholdTime && !restroomStatus?.isBeingCleaned) {
+          const etaMins = prediction.predictedThresholdTime - state.time;
+          const etaH = Math.floor(prediction.predictedThresholdTime / 60);
+          const etaM = Math.floor(prediction.predictedThresholdTime % 60);
+          const ampm = etaH >= 12 ? 'PM' : 'AM';
+          const displayH = etaH % 12 || 12;
+          const etaStr = `ETA ${displayH}:${etaM.toString().padStart(2, '0')} ${ampm}`;
+
+          ctx.font = 'bold 10px "Inter", sans-serif';
+          const etaWidth = ctx.measureText(etaStr).width;
+
+          // Color by urgency
+          let etaColor = '#16a34a'; // green: > 30 min
+          if (etaMins <= 10) etaColor = '#dc2626'; // red: < 10 min
+          else if (etaMins <= 30) etaColor = '#ca8a04'; // yellow: 10-30 min
+
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+          ctx.fillRect(-etaWidth / 2 - 3, 8, etaWidth + 6, 14);
+          ctx.fillStyle = etaColor;
+          ctx.fillText(etaStr, 0, 15);
+
+          // Surge warning
+          if (prediction.surgeExpected) {
+            ctx.fillStyle = '#f97316';
+            ctx.font = 'bold 8px "Inter", sans-serif';
+            ctx.fillText('SURGE', 0, 27);
+          }
+        }
+
         ctx.restore();
       }
 

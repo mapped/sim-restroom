@@ -64,6 +64,7 @@ export default function App() {
     meetings: [],
     workOrders: [],
     restroomStatuses: createInitialRestroomStatuses(),
+    predictions: [],
     predictiveMode: true,
     speedMultiplier: 300,
     isResetting: false,
@@ -73,6 +74,7 @@ export default function App() {
   const lastUpdateRef = useRef<number>(performance.now());
   const requestRef = useRef<number>(null);
   const pendingEventsRef = useRef<SimEvent[]>([]);
+  const eventHistoryRef = useRef<SimEvent[]>([]);
   const fastForwardRef = useRef<{ target: number } | null>(null);
 
   const formatTime = (mins: number) => {
@@ -98,7 +100,7 @@ export default function App() {
         ? { ...prev, speedMultiplier: FAST_FORWARD_SPEED }
         : prev;
 
-      const { nextState, events: newEvents } = updateSimulation(simState, realDelta);
+      const { nextState, events: newEvents } = updateSimulation(simState, realDelta, eventHistoryRef.current);
       pendingEventsRef.current = newEvents;
 
       // Restore actual speed multiplier (don't persist the hyper speed)
@@ -128,6 +130,7 @@ export default function App() {
     if (pendingEventsRef.current.length > 0) {
       const batch = pendingEventsRef.current;
       pendingEventsRef.current = [];
+      eventHistoryRef.current = [...eventHistoryRef.current, ...batch];
       setEvents(e => [...e, ...batch]);
     }
 
@@ -156,6 +159,7 @@ export default function App() {
             meetings: [],
             workOrders: [],
             restroomStatuses: createInitialRestroomStatuses(),
+            predictions: [],
             npcs: prev.npcs.map(npc => resetNPC(npc, cleanRooms, [0, 0.3])),
           };
         });
@@ -185,6 +189,7 @@ export default function App() {
         const cleanRooms = makeCleanRooms();
         fastForwardRef.current = { target: targetTime };
         setEvents([]);
+        eventHistoryRef.current = [];
         return {
           ...prev,
           day: prev.day + 1,
@@ -194,6 +199,7 @@ export default function App() {
           meetings: [],
           workOrders: [],
           restroomStatuses: createInitialRestroomStatuses(),
+          predictions: [],
           npcs: prev.npcs.map(npc => resetNPC(npc, cleanRooms, [0, 0.3])),
         };
       }
