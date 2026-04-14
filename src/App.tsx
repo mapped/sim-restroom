@@ -5,49 +5,75 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SimState, SimEvent, Room, NPCState } from '@/types/sim';
-import { INITIAL_ROOMS, createNPC, updateSimulation, getDeskIdForNPC } from '@/simulation/engine';
+import { INITIAL_ROOMS, createNPC, createJanitorNPC, createInitialRestroomStatuses, updateSimulation, getDeskIdForNPC, JANITORIAL_RULES, SIM_CONFIG } from '@/simulation/engine';
 import { IsometricRenderer } from '@/components/Simulator/Canvas';
 import { Controls } from '@/components/Simulator/Controls';
 import { Badge } from '@/components/ui/badge';
 
-const getInitialSettings = () => {
-  const stored = localStorage.getItem('mappedSimSettings');
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored);
-      return {
-        population: parsed.population || 20,
-        speed: parsed.speed || 60
-      };
-    } catch {
-      return { population: 20, speed: 60 };
-    }
-  }
-  return { population: 20, speed: 60 };
-};
+const POPULATION = 20;
+const FAST_FORWARD_SPEED = 10000; // hyper speed multiplier during fast-forward
 
 function makeCleanRooms(): Room[] {
   return INITIAL_ROOMS.map(r => ({ ...r, occupancy: [], flashColor: null as Room['flashColor'], flashTimer: 0 }));
 }
 
-export default function App() {
-  const [state, setState] = useState<SimState>(() => {
-    const settings = getInitialSettings();
+function makeInitialNPCs() {
+  const employees = Array.from({ length: POPULATION }).map((_, i) => createNPC(i));
+  return [...employees, createJanitorNPC()];
+}
+
+function resetNPC(npc: any, cleanRooms: Room[], urgencyRange: [number, number]) {
+  if (npc.npcType === 'JANITOR') {
+    const closet = cleanRooms.find(r => r.id === JANITORIAL_RULES.janitorClosetId);
     return {
-      time: 360,
-      day: 1,
-      npcs: Array.from({ length: settings.population }).map((_, i) => createNPC(i)),
-      rooms: makeCleanRooms(),
-      meetings: [],
-      speedMultiplier: settings.speed,
-      isResetting: false
+      ...npc,
+      x: closet ? closet.door.x : npc.x,
+      y: closet ? closet.door.y : npc.y,
+      targetX: closet ? closet.door.x : npc.x,
+      targetY: closet ? closet.door.y : npc.y,
+      state: NPCState.IDLE,
+      path: [],
+      currentRoomId: JANITORIAL_RULES.janitorClosetId,
+      targetRoomId: undefined,
+      leaveTime: undefined,
     };
-  });
+  }
+  const deskId = getDeskIdForNPC(npc.id);
+  const desk = cleanRooms.find(r => r.id === deskId);
+  return {
+    ...npc,
+    x: desk ? desk.x + 0.5 : npc.x,
+    y: desk ? desk.y + 0.5 : npc.y,
+    targetX: desk ? desk.x + 0.5 : npc.x,
+    targetY: desk ? desk.y + 0.5 : npc.y,
+    state: NPCState.WORKING,
+    path: [],
+    restroomUrgency: urgencyRange[0] + Math.random() * (urgencyRange[1] - urgencyRange[0]),
+    currentRoomId: deskId,
+    targetRoomId: undefined,
+    leaveTime: undefined,
+  };
+}
+
+export default function App() {
+  const [state, setState] = useState<SimState>(() => ({
+    time: 360,
+    day: 1,
+    npcs: makeInitialNPCs(),
+    rooms: makeCleanRooms(),
+    meetings: [],
+    workOrders: [],
+    restroomStatuses: createInitialRestroomStatuses(),
+    predictiveMode: true,
+    speedMultiplier: 300,
+    isResetting: false,
+  }));
 
   const [events, setEvents] = useState<SimEvent[]>([]);
   const lastUpdateRef = useRef<number>(performance.now());
   const requestRef = useRef<number>(null);
   const pendingEventsRef = useRef<SimEvent[]>([]);
+  const fastForwardRef = useRef<{ target: number } | null>(null);
 
   const formatTime = (mins: number) => {
     const h = Math.floor(mins / 60);
@@ -57,15 +83,46 @@ export default function App() {
     return `${displayH}:${m.toString().padStart(2, '0')} ${ampm}`;
   };
 
+  const isFastForwarding = fastForwardRef.current !== null;
+
   const animate = useCallback((time: number) => {
-    const deltaTime = time - lastUpdateRef.current;
+    const realDelta = time - lastUpdateRef.current;
     lastUpdateRef.current = time;
 
     setState(prev => {
       if (prev.isResetting) return prev;
-      const { nextState, events: newEvents } = updateSimulation(prev, deltaTime);
+
+      // During fast-forward, override speed to hyper speed
+      const ff = fastForwardRef.current;
+      const simState = ff
+        ? { ...prev, speedMultiplier: FAST_FORWARD_SPEED }
+        : prev;
+
+      const { nextState, events: newEvents } = updateSimulation(simState, realDelta);
       pendingEventsRef.current = newEvents;
-      return nextState;
+
+      // Restore actual speed multiplier (don't persist the hyper speed)
+      const result = ff
+        ? { ...nextState, speedMultiplier: prev.speedMultiplier }
+        : nextState;
+
+      // Check if fast-forward target reached
+      if (ff && result.time >= ff.target) {
+        fastForwardRef.current = null;
+      }
+
+      // Auto-slowdown during cleaning — entirely in state (refs don't survive
+      // React's double-invocation of setState updaters).
+      const anyCleaning = result.restroomStatuses.some(s => s.isBeingCleaned);
+
+      if (anyCleaning && !result.preCleaningSpeed && result.speedMultiplier >= 300) {
+        return { ...result, preCleaningSpeed: result.speedMultiplier, speedMultiplier: 60 };
+      }
+      if (!anyCleaning && result.preCleaningSpeed) {
+        return { ...result, speedMultiplier: result.preCleaningSpeed, preCleaningSpeed: undefined };
+      }
+
+      return result;
     });
 
     if (pendingEventsRef.current.length > 0) {
@@ -84,6 +141,7 @@ export default function App() {
     };
   }, [animate]);
 
+  // Day-end reset
   useEffect(() => {
     if (state.isResetting) {
       const timer = setTimeout(() => {
@@ -96,23 +154,9 @@ export default function App() {
             isResetting: false,
             rooms: cleanRooms,
             meetings: [],
-            npcs: prev.npcs.map(npc => {
-              const deskId = getDeskIdForNPC(npc.id);
-              const desk = cleanRooms.find(r => r.id === deskId);
-              return {
-                ...npc,
-                x: desk ? desk.x + 0.5 : npc.x,
-                y: desk ? desk.y + 0.5 : npc.y,
-                targetX: desk ? desk.x + 0.5 : npc.x,
-                targetY: desk ? desk.y + 0.5 : npc.y,
-                state: NPCState.WORKING,
-                path: [],
-                restroomUrgency: Math.random() * 0.3,
-                currentRoomId: deskId,
-                targetRoomId: undefined,
-                leaveTime: undefined,
-              };
-            })
+            workOrders: [],
+            restroomStatuses: createInitialRestroomStatuses(),
+            npcs: prev.npcs.map(npc => resetNPC(npc, cleanRooms, [0, 0.3])),
           };
         });
       }, 2000);
@@ -120,57 +164,39 @@ export default function App() {
     }
   }, [state.isResetting]);
 
-  const handleApplySettings = (count: number, speed: number) => {
-    localStorage.setItem('mappedSimSettings', JSON.stringify({ population: count, speed }));
-    setEvents([]);
-    setState(() => ({
-      time: 360,
-      day: 1,
-      speedMultiplier: speed,
-      isResetting: false,
-      rooms: makeCleanRooms(),
-      meetings: [],
-      npcs: Array.from({ length: count }).map((_, i) => createNPC(i)),
-    }));
+  const handleSetSpeed = (speed: number) => {
+    setState(prev => ({ ...prev, speedMultiplier: speed, preCleaningSpeed: undefined }));
+  };
+
+  const handleTogglePredictive = (enabled: boolean) => {
+    setState(prev => ({ ...prev, predictiveMode: enabled }));
   };
 
   const skipToAllHands = () => {
-    setEvents([]);
+    const targetTime = SIM_CONFIG.ALL_HANDS_TIME - 5; // 5 min before all-hands
+
     setState(prev => {
-      let nextDay = prev.day;
-      const dow = prev.day % 7;
-
-      if (dow < 2) nextDay = prev.day + (2 - dow);
-      else if (dow === 2) nextDay = prev.time < 780 ? prev.day : prev.day + 2;
-      else if (dow < 4) nextDay = prev.day + (4 - dow);
-      else if (dow === 4) nextDay = prev.time < 780 ? prev.day : prev.day + 5;
-      else nextDay = prev.day + (9 - dow);
-
-      const cleanRooms = makeCleanRooms();
-      return {
-        ...prev,
-        day: nextDay,
-        time: 775,
-        rooms: cleanRooms,
-        meetings: [],
-        npcs: prev.npcs.map(npc => {
-          const deskId = getDeskIdForNPC(npc.id);
-          const desk = cleanRooms.find(r => r.id === deskId);
-          return {
-            ...npc,
-            x: desk ? desk.x + 0.5 : npc.x,
-            y: desk ? desk.y + 0.5 : npc.y,
-            targetX: desk ? desk.x + 0.5 : npc.x,
-            targetY: desk ? desk.y + 0.5 : npc.y,
-            restroomUrgency: 0.4 + Math.random() * 0.4,
-            state: NPCState.WORKING,
-            currentRoomId: deskId,
-            targetRoomId: undefined,
-            leaveTime: undefined,
-            path: [],
-          };
-        })
-      };
+      if (prev.time < targetTime) {
+        // Future today — just fast-forward
+        fastForwardRef.current = { target: targetTime };
+        return prev;
+      } else {
+        // Past all-hands — reset to next day, then fast-forward
+        const cleanRooms = makeCleanRooms();
+        fastForwardRef.current = { target: targetTime };
+        setEvents([]);
+        return {
+          ...prev,
+          day: prev.day + 1,
+          time: 360,
+          isResetting: false,
+          rooms: cleanRooms,
+          meetings: [],
+          workOrders: [],
+          restroomStatuses: createInitialRestroomStatuses(),
+          npcs: prev.npcs.map(npc => resetNPC(npc, cleanRooms, [0, 0.3])),
+        };
+      }
     });
   };
 
@@ -181,28 +207,26 @@ export default function App() {
           <div className="relative">
             <IsometricRenderer state={state} />
 
-            {/* Time & day overlay */}
+            {/* Time overlay */}
             <div className="absolute top-[8%] right-[4%] flex flex-col items-end gap-2 z-10">
               <div className="text-3xl font-mono font-bold text-slate-800 bg-white/90 backdrop-blur-sm px-3 py-1.5 border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)]">
                 {formatTime(state.time)}
               </div>
-              <div className="flex gap-2">
-                <Badge className="bg-slate-800 text-white font-mono px-3 py-1">
-                  DAY {state.day}
+              {fastForwardRef.current && (
+                <Badge className="bg-yellow-500 text-black font-mono px-3 py-1 animate-pulse">
+                  FAST FORWARD
                 </Badge>
-                <Badge className="bg-blue-600 text-white font-mono px-3 py-1">
-                  {state.day % 7 === 2 || state.day % 7 === 4 ? 'ALL-HANDS DAY' : 'REGULAR DAY'}
-                </Badge>
-              </div>
+              )}
             </div>
           </div>
 
           <div className="px-4 md:px-8">
             <Controls
-              npcCount={state.npcs.length}
               speed={state.speedMultiplier}
-              onApplySettings={handleApplySettings}
+              predictiveMode={state.predictiveMode}
+              onSetSpeed={handleSetSpeed}
               onSkipToAllHands={skipToAllHands}
+              onTogglePredictive={handleTogglePredictive}
               events={events}
             />
           </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useMemo } from 'react';
-import { SimState, Room, RoomType, NPC } from '@/types/sim';
+import { SimState, Room, RoomType, NPC, RestroomStatus } from '@/types/sim';
+import { JANITORIAL_RULES } from '@/simulation/engine';
 
 interface RendererProps {
   state: SimState;
@@ -115,6 +116,18 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
           baseColor = '#fff7ed';
           floorPattern = 'wood';
           break;
+        case RoomType.JANITOR_CLOSET:
+          baseColor = '#e2e8f0';
+          floorPattern = 'plain';
+          break;
+      }
+
+      // Restroom being cleaned — pulsing red-to-white
+      const restroomStatus = state.restroomStatuses?.find(s => s.roomId === room.id);
+      if (restroomStatus?.isBeingCleaned) {
+        const pulse = (Math.sin(Date.now() / 400) + 1) / 2; // 0..1 oscillation
+        const alpha = 0.15 + pulse * 0.25; // pulses between 0.15 and 0.40
+        baseColor = `rgba(239, 68, 68, ${alpha})`;
       }
 
       if (room.flashColor && room.flashTimer! > 0) {
@@ -299,6 +312,17 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
         ctx.fillText(room.label.toUpperCase(), 0, 0);
         ctx.restore();
       }
+
+      // Sad face emoji when restroom is dirty (usage >= dirtyThreshold, not being cleaned)
+      if (restroomStatus && restroomStatus.usageCount >= JANITORIAL_RULES.dirtyThreshold && !restroomStatus.isBeingCleaned) {
+        const center = project(room.x + room.width / 2, room.y + room.height / 2);
+        ctx.save();
+        ctx.font = '28px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('\u{1F61E}', center.px, center.py);
+        ctx.restore();
+      }
     });
 
     // Draw NPCs
@@ -306,22 +330,39 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
       const { px, py } = project(npc.x, npc.y);
       const h = 24 * npc.size;
       const w = 12 * npc.size;
+      const isJanitor = npc.npcType === 'JANITOR';
 
+      // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
       ctx.beginPath();
       ctx.ellipse(px, py + TILE_HEIGHT / 2, 10, 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
+      // Body
       ctx.fillStyle = npc.color;
       ctx.beginPath();
       ctx.roundRect(px - w / 2, py + TILE_HEIGHT / 2 - h, w, h * 0.75, 4);
       ctx.fill();
 
+      // Janitor: white stripe on body (apron look)
+      if (isJanitor) {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fillRect(px - w / 4, py + TILE_HEIGHT / 2 - h + 4, w / 2, h * 0.5);
+      }
+
+      // Head
       ctx.fillStyle = npc.skinColor;
       ctx.beginPath();
       ctx.arc(px, py + TILE_HEIGHT / 2 - h - w / 2, w / 2, 0, Math.PI * 2);
       ctx.fill();
 
+      // Janitor: hat
+      if (isJanitor) {
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(px - w / 2 - 1, py + TILE_HEIGHT / 2 - h - w / 2 - w / 2 - 2, w + 2, 4);
+      }
+
+      // Eyes
       ctx.fillStyle = '#000000';
       const eyeOffset = npc.targetX > npc.x ? 2 : -2;
       ctx.beginPath();
@@ -329,7 +370,8 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
       ctx.arc(px + eyeOffset + 2, py + TILE_HEIGHT / 2 - h - w / 2, 1, 0, Math.PI * 2);
       ctx.fill();
 
-      if (npc.restroomUrgency > 0.5) {
+      // Urgency indicator (employees only)
+      if (!isJanitor && npc.restroomUrgency > 0.5) {
         const pulse = Math.sin(Date.now() / 150) * 3;
         ctx.fillStyle = npc.restroomUrgency > 0.8 ? '#ef4444' : '#f59e0b';
         ctx.beginPath();
@@ -338,6 +380,14 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
         ctx.strokeStyle = 'white';
         ctx.lineWidth = 1.5;
         ctx.stroke();
+      }
+
+      // Cleaning indicator (janitor working)
+      if (isJanitor && npc.state === 'CLEANING') {
+        const pulse = Math.sin(Date.now() / 200) * 2;
+        ctx.font = '14px serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('\u{1F9F9}', px + w / 2 + 8, py + TILE_HEIGHT / 2 - h - w / 2 + pulse); // broom emoji
       }
     });
 
