@@ -74,6 +74,7 @@ export default function App() {
   const requestRef = useRef<number>(null);
   const pendingEventsRef = useRef<SimEvent[]>([]);
   const fastForwardRef = useRef<{ target: number } | null>(null);
+  const cleaningSlowdownRef = useRef<{ restoreSpeed: number } | null>(null);
 
   const formatTime = (mins: number) => {
     const h = Math.floor(mins / 60);
@@ -109,6 +110,20 @@ export default function App() {
       // Check if fast-forward target reached
       if (ff && result.time >= ff.target) {
         fastForwardRef.current = null;
+      }
+
+      // Auto-slowdown during cleaning: drop to Fast (60x) when janitor enters,
+      // restore when janitor leaves. Only triggers from Lightning (300x) speed.
+      for (const e of newEvents) {
+        if (e.type === 'CLEANING_STARTED' && !cleaningSlowdownRef.current && result.speedMultiplier >= 300) {
+          cleaningSlowdownRef.current = { restoreSpeed: result.speedMultiplier };
+          return { ...result, speedMultiplier: 60 };
+        }
+        if (e.type === 'CLEANING_COMPLETED' && cleaningSlowdownRef.current) {
+          const restore = cleaningSlowdownRef.current.restoreSpeed;
+          cleaningSlowdownRef.current = null;
+          return { ...result, speedMultiplier: restore };
+        }
       }
 
       return result;
@@ -154,6 +169,7 @@ export default function App() {
   }, [state.isResetting]);
 
   const handleSetSpeed = (speed: number) => {
+    cleaningSlowdownRef.current = null; // cancel any auto-slowdown
     setState(prev => ({ ...prev, speedMultiplier: speed }));
   };
 
