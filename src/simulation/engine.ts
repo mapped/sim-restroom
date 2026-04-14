@@ -1,4 +1,4 @@
-import { Room, RoomType, NPC, NPCState, Point, SimState, SimEvent, ScheduledMeeting } from '@/types/sim';
+import { Room, RoomType, NPC, NPCState, Point, SimState, SimEvent, ScheduledMeeting, WorkOrder, RestroomStatus } from '@/types/sim';
 
 // ============================================================================
 // ROOM REGISTRY — Single source of truth for all room ↔ NPC relationships
@@ -64,7 +64,7 @@ function registryValidate(reg: RoomRegistry): boolean {
 }
 
 // ============================================================================
-// CONFIGURATION — All tunable rules in one place
+// CONFIGURATION
 // ============================================================================
 
 const GRID_SIZE = 40;
@@ -77,15 +77,24 @@ export const SIM_CONFIG = {
   WORK_DAY_END: 1080,  // 6 PM
   ALL_HANDS_TIME: 780,  // 1 PM
   ALL_HANDS_DURATION: 10,
-  LOUNGE_PROBABILITY: 0.000001, // per NPC per tick (multiplied by speedMultiplier)
+  LOUNGE_PROBABILITY: 0.000001,
 };
 
 export const MEETING_RULES = {
   attendeesMin: 2,
   attendeesMax: 4,
-  durations: [5, 15] as number[],  // minutes — randomly chosen per meeting
-  boundaryInterval: 5,              // meetings start on 5-min marks (e.g. 9:00, 9:05, 9:10)
+  durations: [5, 15] as number[],
+  boundaryInterval: 5,
   roomIds: ['MEET-001', 'MEET-002'],
+};
+
+export const JANITORIAL_RULES = {
+  cleaningThreshold: 20,     // uses before work order in predictive mode
+  dirtyThreshold: 25,        // uses before sad face
+  cleaningDuration: 5,       // minutes to clean
+  scheduledCleanTime: 1020,  // 5:00 PM for scheduled mode
+  janitorClosetId: 'JAN-CLOSET',
+  restroomIds: ['REST-001', 'REST-002'],
 };
 
 // ============================================================================
@@ -114,6 +123,7 @@ export const INITIAL_ROOMS: Room[] = [
   { id: 'AUD-001', type: RoomType.AUDITORIUM, x: 2, y: 10, width: 10, height: 12, label: 'Auditorium', occupancy: [], door: { x: 12, y: 16 } },
   { id: 'MEET-001', type: RoomType.MEETING_ROOM, x: 2, y: 24, width: 6, height: 4, label: 'Meeting A', capacity: 6, occupancy: [], door: { x: 8, y: 26 } },
   { id: 'MEET-002', type: RoomType.MEETING_ROOM, x: 2, y: 30, width: 6, height: 4, label: 'Meeting B', capacity: 6, occupancy: [], door: { x: 8, y: 32 } },
+  { id: 'JAN-CLOSET', type: RoomType.JANITOR_CLOSET, x: 2, y: 36, width: 2, height: 2, label: 'Janitor', capacity: 1, occupancy: [], door: { x: 4, y: 37 } },
 ];
 
 // ============================================================================
@@ -131,7 +141,7 @@ export function createNPC(id: number): NPC {
   const deskId = `DESK-${(id + 1).toString().padStart(3, '0')}`;
   const desk = INITIAL_ROOMS.find(r => r.id === deskId);
   return {
-    id: `NPC-${id}`, name: `Employee ${id}`,
+    id: `NPC-${id}`, name: `Employee ${id}`, npcType: 'EMPLOYEE',
     x: desk?.x || 0, y: desk?.y || 0,
     targetX: desk?.x || 0, targetY: desk?.y || 0,
     state: NPCState.WORKING,
@@ -143,6 +153,32 @@ export function createNPC(id: number): NPC {
     lastRestroomTime: SIM_CONFIG.WORK_DAY_START,
     path: [], currentRoomId: deskId, targetRoomId: undefined, leaveTime: undefined,
   };
+}
+
+export function createJanitorNPC(): NPC {
+  const closet = INITIAL_ROOMS.find(r => r.id === JANITORIAL_RULES.janitorClosetId)!;
+  return {
+    id: 'JAN-01', name: 'Janitor', npcType: 'JANITOR',
+    x: closet.door.x, y: closet.door.y,
+    targetX: closet.door.x, targetY: closet.door.y,
+    state: NPCState.IDLE,
+    speed: 0.06,
+    color: '#22c55e',       // green uniform
+    skinColor: '#F1C27D',
+    size: 1.0,
+    restroomUrgency: 0,
+    lastRestroomTime: 0,
+    path: [], currentRoomId: JANITORIAL_RULES.janitorClosetId, targetRoomId: undefined, leaveTime: undefined,
+  };
+}
+
+export function createInitialRestroomStatuses(): RestroomStatus[] {
+  return JANITORIAL_RULES.restroomIds.map(roomId => ({
+    roomId,
+    usageCount: 0,
+    lastCleanedAt: SIM_CONFIG.WORK_DAY_START,
+    isBeingCleaned: false,
+  }));
 }
 
 // ============================================================================
@@ -176,10 +212,6 @@ export function findPath(start: Point, end: Point): Point[] {
 
 // ============================================================================
 // MEETING SCHEDULER
-//
-// Keeps both meeting rooms continuously occupied. When a room becomes free,
-// schedules the next meeting at the next 5-minute calendar boundary with a
-// random subset of available (desk-sitting) NPCs.
 // ============================================================================
 
 function scheduleMeetings(
@@ -188,24 +220,17 @@ function scheduleMeetings(
   npcs: NPC[],
   registry: RoomRegistry,
 ): ScheduledMeeting[] {
-  // Keep meetings that haven't ended
   const live = currentMeetings.filter(m => newTime < m.endTime);
-
-  // NPCs already assigned to a live meeting
   const assignedIds = new Set(live.flatMap(m => m.attendeeIds));
 
   for (const roomId of MEETING_RULES.roomIds) {
-    // Skip if this room already has a meeting (active or upcoming)
     if (live.some(m => m.roomId === roomId)) continue;
-
-    // Next 5-minute boundary
     const boundary = Math.ceil(newTime / MEETING_RULES.boundaryInterval) * MEETING_RULES.boundaryInterval;
-    if (boundary + MEETING_RULES.durations[0] > SIM_CONFIG.WORK_DAY_END) continue; // too late in the day
+    if (boundary + MEETING_RULES.durations[0] > SIM_CONFIG.WORK_DAY_END) continue;
 
     const duration = MEETING_RULES.durations[Math.floor(Math.random() * MEETING_RULES.durations.length)];
-
-    // Available: at desk, not already assigned
     const available = npcs.filter(n =>
+      n.npcType !== 'JANITOR' &&
       n.state === NPCState.WORKING &&
       registryGetRoom(registry, n.id)?.startsWith('DESK') &&
       !assignedIds.has(n.id)
@@ -217,9 +242,7 @@ function scheduleMeetings(
 
     if (picked.length >= MEETING_RULES.attendeesMin) {
       const meeting: ScheduledMeeting = {
-        roomId,
-        startTime: boundary,
-        endTime: boundary + duration,
+        roomId, startTime: boundary, endTime: boundary + duration,
         attendeeIds: picked.map(n => n.id),
       };
       live.push(meeting);
@@ -243,6 +266,209 @@ function findActiveMeetingForRoom(meetings: ScheduledMeeting[], roomId: string, 
 }
 
 // ============================================================================
+// JANITORIAL SYSTEM
+// ============================================================================
+
+let workOrderCounter = 0;
+
+function updateRestroomStatuses(
+  statuses: RestroomStatus[],
+  events: SimEvent[],
+  workOrders: WorkOrder[],
+  predictiveMode: boolean,
+  newTime: number,
+  newEvents: SimEvent[],
+): { statuses: RestroomStatus[]; workOrders: WorkOrder[] } {
+  const updated = statuses.map(s => ({ ...s }));
+  const updatedOrders = [...workOrders];
+
+  // Count ENTER events for restrooms
+  for (const e of events) {
+    if (e.type === 'ENTER') {
+      const status = updated.find(s => s.roomId === e.restroomId);
+      if (status) status.usageCount++;
+    }
+  }
+
+  if (predictiveMode) {
+    // Create work orders when threshold is hit
+    for (const status of updated) {
+      if (status.usageCount >= JANITORIAL_RULES.cleaningThreshold && !status.isBeingCleaned) {
+        const hasOrder = updatedOrders.some(wo =>
+          wo.restroomId === status.roomId && (wo.status === 'PENDING' || wo.status === 'IN_PROGRESS')
+        );
+        if (!hasOrder) {
+          const wo: WorkOrder = {
+            id: `WO-${++workOrderCounter}`,
+            restroomId: status.roomId,
+            createdAt: newTime,
+            status: 'PENDING',
+          };
+          updatedOrders.push(wo);
+          newEvents.push({ type: 'WORK_ORDER_CREATED', restroomId: status.roomId, npcId: 'JAN-01', timestamp: newTime });
+        }
+      }
+    }
+  }
+
+  return { statuses: updated, workOrders: updatedOrders };
+}
+
+function checkScheduledCleaning(
+  workOrders: WorkOrder[],
+  newTime: number,
+  prevTime: number,
+  newEvents: SimEvent[],
+): WorkOrder[] {
+  const updated = [...workOrders];
+  // Trigger at scheduled time — check if we just crossed the boundary
+  if (prevTime < JANITORIAL_RULES.scheduledCleanTime && newTime >= JANITORIAL_RULES.scheduledCleanTime) {
+    for (const roomId of JANITORIAL_RULES.restroomIds) {
+      const hasOrder = updated.some(wo =>
+        wo.restroomId === roomId && (wo.status === 'PENDING' || wo.status === 'IN_PROGRESS')
+      );
+      if (!hasOrder) {
+        const wo: WorkOrder = {
+          id: `WO-${++workOrderCounter}`,
+          restroomId: roomId,
+          createdAt: newTime,
+          status: 'PENDING',
+        };
+        updated.push(wo);
+        newEvents.push({ type: 'WORK_ORDER_CREATED', restroomId: roomId, npcId: 'JAN-01', timestamp: newTime });
+      }
+    }
+  }
+  return updated;
+}
+
+function processJanitorNPC(
+  npc: NPC,
+  registry: RoomRegistry,
+  roomsById: Map<string, Room>,
+  workOrders: WorkOrder[],
+  restroomStatuses: RestroomStatus[],
+  ctx: TickContext,
+  events: SimEvent[],
+  flashes: Map<string, { color: 'green' | 'red'; timer: number }>,
+): NPC {
+  const n: NPC = { ...npc, path: [...npc.path] };
+  const currentRoomId = registryGetRoom(registry, n.id);
+
+  // --- CLEANING: wait for leaveTime ---
+  if (n.state === NPCState.CLEANING) {
+    if (n.leaveTime != null && ctx.newTime >= n.leaveTime) {
+      // Done cleaning — exit room
+      const room = currentRoomId ? roomsById.get(currentRoomId) : undefined;
+      if (room) {
+        // Mark cleaning complete
+        const status = restroomStatuses.find(s => s.roomId === currentRoomId);
+        if (status) {
+          status.usageCount = 0;
+          status.lastCleanedAt = ctx.newTime;
+          status.isBeingCleaned = false;
+        }
+        const wo = workOrders.find(w => w.restroomId === currentRoomId && w.status === 'IN_PROGRESS');
+        if (wo) wo.status = 'COMPLETED';
+        events.push({ type: 'CLEANING_COMPLETED', restroomId: currentRoomId!, npcId: n.id, timestamp: ctx.newTime });
+        flashes.set(currentRoomId!, { color: 'green', timer: 1000 });
+
+        // Walk to door to exit
+        n.targetRoomId = currentRoomId;
+        n.targetX = room.door.x;
+        n.targetY = room.door.y;
+        n.state = NPCState.WALKING;
+        n.leaveTime = undefined;
+        n.path = findPath({ x: n.x, y: n.y }, room.door);
+      }
+    }
+    n.currentRoomId = registryGetRoom(registry, n.id);
+    return n;
+  }
+
+  // --- WALKING ---
+  if (n.state === NPCState.WALKING) {
+    let budget = Math.min(n.speed * (ctx.deltaTime / 16) * (ctx.speedMultiplier / 10 + 1), 1.5);
+    while (budget > 0 && n.path.length > 0) {
+      const next = n.path[0];
+      const dx = next.x - n.x, dy = next.y - n.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= budget) {
+        n.x = next.x; n.y = next.y; n.path.shift(); budget -= dist;
+      } else {
+        n.x += (dx / dist) * budget; n.y += (dy / dist) * budget; budget = 0;
+      }
+    }
+
+    if (n.path.length === 0 && n.targetRoomId) {
+      const target = roomsById.get(n.targetRoomId);
+      if (target) {
+        n.x = target.door.x; n.y = target.door.y;
+
+        if (currentRoomId === n.targetRoomId) {
+          // Exiting a room (restroom after cleaning, or closet)
+          registryExit(registry, n.id);
+          n.targetRoomId = undefined;
+
+          // Check for next pending work order
+          const nextWo = workOrders.find(w => w.status === 'PENDING');
+          if (nextWo) {
+            sendToRoom(n, nextWo.restroomId, roomsById);
+          } else {
+            // Return to closet
+            sendToRoom(n, JANITORIAL_RULES.janitorClosetId, roomsById);
+          }
+        } else {
+          // Entering a room
+          if (target.type === RoomType.RESTROOM_GN || target.type === RoomType.RESTROOM_FAM) {
+            // Only enter if restroom is empty (wait at door if occupied)
+            if (registryOccupancy(registry, target.id) === 0) {
+              if (currentRoomId) registryExit(registry, n.id);
+              registryEnter(registry, n.id, target.id);
+              n.targetRoomId = undefined;
+              n.state = NPCState.CLEANING;
+              n.leaveTime = ctx.newTime + JANITORIAL_RULES.cleaningDuration;
+
+              const status = restroomStatuses.find(s => s.roomId === target.id);
+              if (status) status.isBeingCleaned = true;
+              const wo = workOrders.find(w => w.restroomId === target.id && w.status === 'PENDING');
+              if (wo) wo.status = 'IN_PROGRESS';
+
+              events.push({ type: 'CLEANING_STARTED', restroomId: target.id, npcId: n.id, timestamp: ctx.newTime });
+
+              const pad = 0.8;
+              n.x = target.x + pad + Math.random() * (target.width - pad * 2);
+              n.y = target.y + pad + Math.random() * (target.height - pad * 2);
+            }
+            // else: stay at door, wait — path is empty so we'll check again next tick
+          } else if (target.type === RoomType.JANITOR_CLOSET) {
+            if (currentRoomId) registryExit(registry, n.id);
+            registryEnter(registry, n.id, target.id);
+            n.targetRoomId = undefined;
+            n.state = NPCState.IDLE;
+          }
+        }
+      }
+    }
+
+    n.currentRoomId = registryGetRoom(registry, n.id);
+    return n;
+  }
+
+  // --- IDLE: check for pending work orders ---
+  if (n.state === NPCState.IDLE) {
+    const nextWo = workOrders.find(w => w.status === 'PENDING');
+    if (nextWo) {
+      if (currentRoomId) registryExit(registry, n.id);
+      sendToRoom(n, nextWo.restroomId, roomsById);
+    }
+  }
+
+  n.currentRoomId = registryGetRoom(registry, n.id);
+  return n;
+}
+
+// ============================================================================
 // HELPERS
 // ============================================================================
 
@@ -254,10 +480,15 @@ interface TickContext {
   isAllHandsTime: boolean;
 }
 
-function findAvailableRestroom(reg: RoomRegistry, roomsById: Map<string, Room>): string | null {
+function findAvailableRestroom(
+  reg: RoomRegistry,
+  roomsById: Map<string, Room>,
+  restroomStatuses: RestroomStatus[],
+): string | null {
   const restrooms = Array.from(roomsById.values()).filter(r =>
     (r.type === RoomType.RESTROOM_GN || r.type === RoomType.RESTROOM_FAM) &&
-    registryOccupancy(reg, r.id) < (r.capacity || 5)
+    registryOccupancy(reg, r.id) < (r.capacity || 5) &&
+    !restroomStatuses.find(s => s.roomId === r.id)?.isBeingCleaned
   );
   if (restrooms.length === 0) return null;
   return restrooms[Math.floor(Math.random() * restrooms.length)].id;
@@ -278,11 +509,12 @@ function decidePostExitDestination(
   reg: RoomRegistry,
   roomsById: Map<string, Room>,
   meetings: ScheduledMeeting[],
+  restroomStatuses: RestroomStatus[],
   ctx: TickContext,
 ): string {
   if (ctx.isAllHandsTime) return 'AUD-001';
   if (npc.restroomUrgency > 0.8) {
-    const r = findAvailableRestroom(reg, roomsById);
+    const r = findAvailableRestroom(reg, roomsById, restroomStatuses);
     if (r) return r;
   }
   const meeting = findActiveMeetingForNPC(meetings, npc.id, ctx.newTime);
@@ -291,15 +523,7 @@ function decidePostExitDestination(
 }
 
 // ============================================================================
-// PROCESS SINGLE NPC
-//
-// Phases:
-//   1. Update urgency
-//   2. If in non-desk room & not walking → check if should leave → walk to door
-//   3. Movement → door transitions (enter/exit via registry)
-//   4. Desk decisions → assigned meeting? restroom? break?
-//   5. IDLE recovery → go to desk
-//   6. Sync currentRoomId from registry
+// PROCESS SINGLE EMPLOYEE NPC
 // ============================================================================
 
 function processNPC(
@@ -307,6 +531,7 @@ function processNPC(
   registry: RoomRegistry,
   roomsById: Map<string, Room>,
   meetings: ScheduledMeeting[],
+  restroomStatuses: RestroomStatus[],
   ctx: TickContext,
   events: SimEvent[],
   flashes: Map<string, { color: 'green' | 'red'; timer: number }>,
@@ -360,7 +585,6 @@ function processNPC(
       }
     }
 
-    // Door transition
     if (n.path.length === 0 && n.targetRoomId) {
       const target = roomsById.get(n.targetRoomId);
       if (!target) { n.targetRoomId = undefined; n.state = NPCState.IDLE; }
@@ -375,17 +599,32 @@ function processNPC(
             flashes.set(target.id, { color: 'red', timer: 1000 });
           }
           n.targetRoomId = undefined; n.leaveTime = undefined;
-          const dest = decidePostExitDestination(n, registry, roomsById, meetings, ctx);
+          const dest = decidePostExitDestination(n, registry, roomsById, meetings, restroomStatuses, ctx);
           sendToRoom(n, dest, roomsById);
 
         } else if (currentRoomId == null || currentRoomId.startsWith('DESK')) {
           // ── ENTER ──
-          // Meeting room: only enter if meeting is still active
+          // Meeting room: only enter if meeting still active
           if (target.type === RoomType.MEETING_ROOM) {
             const activeMeeting = findActiveMeetingForRoom(meetings, target.id, ctx.newTime);
             if (!activeMeeting) {
-              // Meeting ended while walking — redirect to desk
               sendToRoom(n, getDeskIdForNPC(n.id), roomsById);
+              n.currentRoomId = registryGetRoom(registry, n.id);
+              return n;
+            }
+          }
+
+          // Restroom: don't enter if being cleaned
+          if (target.type === RoomType.RESTROOM_GN || target.type === RoomType.RESTROOM_FAM) {
+            const status = restroomStatuses.find(s => s.roomId === target.id);
+            if (status?.isBeingCleaned) {
+              // Try the other restroom, or go to desk
+              const alt = findAvailableRestroom(registry, roomsById, restroomStatuses);
+              if (alt) {
+                sendToRoom(n, alt, roomsById);
+              } else {
+                sendToRoom(n, getDeskIdForNPC(n.id), roomsById);
+              }
               n.currentRoomId = registryGetRoom(registry, n.id);
               return n;
             }
@@ -441,7 +680,7 @@ function processNPC(
     if (ctx.isAllHandsTime) {
       dest = 'AUD-001';
     } else if (n.restroomUrgency > 0.8) {
-      dest = findAvailableRestroom(registry, roomsById);
+      dest = findAvailableRestroom(registry, roomsById, restroomStatuses);
     } else {
       const meeting = findActiveMeetingForNPC(meetings, n.id, ctx.newTime);
       if (meeting) {
@@ -490,27 +729,46 @@ export function updateSimulation(
   const registry = buildRegistry(state.npcs, state.rooms.map(r => r.id));
   const roomsById = new Map(state.rooms.map(r => [r.id, r]));
 
-  const isAllHandsDay = (state.day % 7) === 2 || (state.day % 7) === 4;
-  const isAllHandsTime = isAllHandsDay &&
+  const isAllHandsTime =
     newTime >= SIM_CONFIG.ALL_HANDS_TIME &&
     newTime < SIM_CONFIG.ALL_HANDS_TIME + SIM_CONFIG.ALL_HANDS_DURATION;
 
   const ctx: TickContext = { newTime, deltaMins, deltaTime, speedMultiplier: state.speedMultiplier, isAllHandsTime };
 
-  // Schedule meetings before processing NPCs so they can act on new schedules
+  // 1. Schedule meetings
   const updatedMeetings = scheduleMeetings(state.meetings, newTime, state.npcs, registry);
 
+  // 2. Scheduled cleaning check (non-predictive mode)
+  let workOrders = state.workOrders;
   const collectedEvents: SimEvent[] = [];
+  if (!state.predictiveMode) {
+    workOrders = checkScheduledCleaning(workOrders, newTime, state.time, collectedEvents);
+  }
+
   const flashUpdates = new Map<string, { color: 'green' | 'red'; timer: number }>();
 
-  const updatedNPCs = state.npcs.map(npc =>
-    processNPC(npc, registry, roomsById, updatedMeetings, ctx, collectedEvents, flashUpdates)
+  // Mutable copy of restroom statuses for janitor to update
+  const mutableStatuses = state.restroomStatuses.map(s => ({ ...s }));
+  const mutableOrders = [...workOrders];
+
+  // 3. Process employee NPCs
+  const updatedNPCs = state.npcs.map(npc => {
+    if (npc.npcType === 'JANITOR') {
+      return processJanitorNPC(npc, registry, roomsById, mutableOrders, mutableStatuses, ctx, collectedEvents, flashUpdates);
+    }
+    return processNPC(npc, registry, roomsById, updatedMeetings, mutableStatuses, ctx, collectedEvents, flashUpdates);
+  });
+
+  // 4. Update restroom statuses from ENTER events (predictive mode creates work orders)
+  const { statuses: finalStatuses, workOrders: finalOrders } = updateRestroomStatuses(
+    mutableStatuses, collectedEvents, mutableOrders, state.predictiveMode, newTime, collectedEvents
   );
 
   if (!registryValidate(registry)) {
     console.error('REGISTRY VALIDATION FAILED at time', newTime);
   }
 
+  // 5. Build final rooms with labels showing usage count
   const finalRooms = state.rooms.map(room => {
     let flashTimer = Math.max(0, (room.flashTimer || 0) - deltaTime);
     let flashColor: Room['flashColor'] = flashTimer > 0 ? room.flashColor ?? null : null;
@@ -518,17 +776,32 @@ export function updateSimulation(
     if (flash) { flashColor = flash.color; flashTimer = flash.timer; }
 
     const count = registryOccupancy(registry, room.id);
-    const baseLabel = (room.label || '').split(' (')[0];
+    const baseLabel = (room.label || '').split(' (')[0].split(' [')[0];
+
+    // Build label with occupancy and usage counter for restrooms
+    let label = count > 0 ? `${baseLabel} (${count})` : baseLabel;
+    const status = finalStatuses.find(s => s.roomId === room.id);
+    if (status) {
+      label += ` [${status.usageCount}/${JANITORIAL_RULES.cleaningThreshold}]`;
+    }
+
     return {
       ...room,
       occupancy: Array.from(registry.roomToNpcs.get(room.id) || []),
-      flashColor, flashTimer,
-      label: count > 0 ? `${baseLabel} (${count})` : baseLabel,
+      flashColor, flashTimer, label,
     };
   });
 
   return {
-    nextState: { ...state, time: newTime, npcs: updatedNPCs, rooms: finalRooms, meetings: updatedMeetings },
+    nextState: {
+      ...state,
+      time: newTime,
+      npcs: updatedNPCs,
+      rooms: finalRooms,
+      meetings: updatedMeetings,
+      workOrders: finalOrders,
+      restroomStatuses: finalStatuses,
+    },
     events: collectedEvents,
   };
 }

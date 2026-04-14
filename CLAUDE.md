@@ -71,20 +71,38 @@ Decision priority: All-hands > Restroom (urgency > 80%) > Assigned meeting > Ran
 
 Config lives in `MEETING_RULES` at the top of engine.ts. All tunables (attendee count, durations, boundary interval, room IDs) are in one place.
 
+### Janitorial / Work Order System
+
+The core demo feature. Two modes controlled by a live toggle (`predictiveMode` in SimState):
+
+**Predictive mode** (default): `updateRestroomStatuses()` counts ENTER events per restroom. At 20 uses, creates a `WorkOrder` (PENDING). At 25 uses without cleaning, a sad face emoji renders on the floor.
+
+**Scheduled mode**: `checkScheduledCleaning()` creates work orders for all restrooms at 5:00 PM regardless of usage.
+
+**Janitor NPC** (`processJanitorNPC()`): Completely separate from `processNPC()`. State machine:
+- IDLE at closet → picks oldest PENDING work order → walks to restroom
+- At door: waits until `registryOccupancy() === 0` (does NOT enter while occupied)
+- Enters → sets `isBeingCleaned = true` on RestroomStatus → CLEANING state for 5 min
+- Done → resets usageCount, sets `isBeingCleaned = false` → walks back to closet
+
+**Blocking**: `isBeingCleaned` on `RestroomStatus` is checked in `findAvailableRestroom()` and the `processNPC()` ENTER guard. Regular NPCs are redirected to the other restroom or their desk.
+
+Config lives in `JANITORIAL_RULES` at the top of engine.ts.
+
 ### Event System
 
-`updateSimulation()` returns `{ nextState, events }`. Events are restroom ENTER/EXIT records. They are dispatched outside the React setState updater via a `pendingEventsRef` (overwrite, not append) to prevent duplicates from React's double-invocation in StrictMode.
+`updateSimulation()` returns `{ nextState, events }`. Event types: `ENTER`, `EXIT`, `WORK_ORDER_CREATED`, `CLEANING_STARTED`, `CLEANING_COMPLETED`. They are dispatched outside the React setState updater via a `pendingEventsRef` (overwrite, not append) to prevent duplicates from React's double-invocation in StrictMode.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/simulation/engine.ts` | Core engine: RoomRegistry, NPC processing, meeting scheduler, pathfinding, all config |
-| `src/types/sim.ts` | All TypeScript interfaces: NPC, Room, SimState, ScheduledMeeting, SimEvent |
-| `src/App.tsx` | React app shell: animation loop, state init, reset handlers, layout |
-| `src/components/Simulator/Canvas.tsx` | Isometric canvas renderer with auto-fit bounds |
-| `src/components/Simulator/Controls.tsx` | Settings panel, speed buttons, event log |
-| `AGENTS.md` | Simulation rules documentation (restroom, meetings, all-hands, priorities) |
+| `src/simulation/engine.ts` | Core engine: RoomRegistry, NPC processing, janitor processing, meeting scheduler, work order system, pathfinding, all config |
+| `src/types/sim.ts` | All TypeScript interfaces: NPC, Room, SimState, ScheduledMeeting, WorkOrder, RestroomStatus, SimEvent |
+| `src/App.tsx` | React app shell: animation loop, state init, reset handlers, predictive toggle, layout |
+| `src/components/Simulator/Canvas.tsx` | Isometric canvas renderer with auto-fit bounds, cleaning overlays, sad face, janitor visuals |
+| `src/components/Simulator/Controls.tsx` | Settings panel, cleaning mode toggle, restroom status bars, event log |
+| `AGENTS.md` | Simulation rules documentation (restroom, janitorial, meetings, all-hands, priorities) |
 
 ## Import Convention
 
@@ -103,11 +121,12 @@ All imports use the `@/` alias which resolves to `src/`. No relative imports (`.
 Playwright tests in `tests/app.spec.ts` (12 tests):
 - Page loads without console errors
 - Time/day overlay visible
-- Canvas rendered with non-empty content (pixel scan)
+- Canvas rendered with content
 - All controls present and interactive
-- Meeting Room B not clipped (canvas height matches CSS)
-- No border on canvas, white background
-- Full-page screenshot regression
+- Cleaning mode toggle (PREDICTIVE / SCHEDULED)
+- Restroom status panel with usage counters
+- Scheduled mode toggle works (shows "cleaning at 5:00 PM daily")
+- White background, full-page screenshot regression
 
 Snapshot baseline: `tests/app.spec.ts-snapshots/full-page-chromium-darwin.png`
 
@@ -121,6 +140,9 @@ Run `npm test -- --update-snapshots` after intentional visual changes.
 - **Canvas translate offset** — don't hardcode. Use `computeViewBounds()` to calculate from actual room positions.
 - **`targetX` is for movement only** — earlier code overloaded it as a leave timer. Use `NPC.leaveTime` instead.
 - **Desk ID lookup** — NPC-0 maps to DESK-001 (index + 1). Use `getDeskIdForNPC()` everywhere.
+- **Janitor is separate from regular NPCs** — `processJanitorNPC()` is a completely different function, not a branch in `processNPC()`. The janitor has fundamentally different behavior (waiting at doors, sequential work orders).
+- **`isBeingCleaned` blocks entry, not capacity** — Restrooms have capacity 5, so the janitor alone doesn't fill them. The `isBeingCleaned` flag on `RestroomStatus` is the authoritative block, checked in `findAvailableRestroom()` and the NPC ENTER guard.
+- **Predictive toggle is live** — changing `predictiveMode` does not require a restart. Existing pending work orders remain.
 
 ## Origin
 

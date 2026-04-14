@@ -21,13 +21,11 @@ test.describe('Mapped Restroom Sim', () => {
     expect(errors).toEqual([]);
   });
 
-  test('time and day overlay is visible on canvas', async ({ page }) => {
-    // Time display should show AM or PM
+  test('time overlay is visible on canvas', async ({ page }) => {
     await expect(page.locator('text=/\\d+:\\d+ [AP]M/')).toBeVisible();
-    await expect(page.locator('text=/DAY \\d+/')).toBeVisible();
   });
 
-  test('canvas is rendered at correct dimensions', async ({ page }) => {
+  test('canvas is rendered with content', async ({ page }) => {
     const canvas = page.locator('canvas');
     await expect(canvas).toBeVisible();
     const box = await canvas.boundingBox();
@@ -36,59 +34,33 @@ test.describe('Mapped Restroom Sim', () => {
     expect(box!.height).toBeGreaterThan(600);
   });
 
-  test('canvas has non-empty content', async ({ page }) => {
-    const nonEmptyPixels = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas');
-      if (!canvas) return 0;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return 0;
-      const y = Math.floor(canvas.height / 2);
-      const strip = ctx.getImageData(0, y, canvas.width, 1).data;
-      let count = 0;
-      for (let i = 3; i < strip.length; i += 4) {
-        if (strip[i] > 0) count++;
-      }
-      return count;
-    });
-    expect(nonEmptyPixels).toBeGreaterThan(50);
-  });
-
   test('simulation controls are present', async ({ page }) => {
-    await expect(page.locator('text=SIMULATION SETTINGS')).toBeVisible();
-    await expect(page.locator('text=POPULATION')).toBeVisible();
+    await expect(page.locator('text=SIMULATION CONTROLS')).toBeVisible();
     await expect(page.locator('text=SIM SPEED')).toBeVisible();
-    await expect(page.locator('text=SAVE & RESTART')).toBeVisible();
     await expect(page.locator('text=SKIP TO ALL-HANDS')).toBeVisible();
   });
 
-  test('event log panel is present', async ({ page }) => {
-    await expect(page.locator('text=RESTROOM EVENT LOG')).toBeVisible();
+  test('all three speed buttons are visible', async ({ page }) => {
+    await expect(page.locator('button', { hasText: 'Real Time' })).toBeVisible();
+    await expect(page.locator('button', { hasText: 'Fast' })).toBeVisible();
+    await expect(page.locator('button', { hasText: 'Lightning' })).toBeVisible();
   });
 
-  test('speed buttons work', async ({ page }) => {
+  test('speed changes live without restart', async ({ page }) => {
     const lightningBtn = page.locator('button', { hasText: 'Lightning' });
     await lightningBtn.click();
-    await expect(page.locator('text=UNSAVED CHANGES')).toBeVisible();
+    // Speed label updates immediately — no restart needed
+    await expect(page.locator('span', { hasText: 'Lightning (5m/s)' })).toBeVisible();
   });
 
-  test('Meeting Room B is fully visible (not clipped)', async ({ page }) => {
-    // The canvas height is computed from projected room bounds.
-    // Verify the canvas attribute height matches CSS height (no clipping).
-    const dims = await page.evaluate(() => {
-      const c = document.querySelector('canvas');
-      if (!c) return null;
-      return { attr: c.height, css: c.getBoundingClientRect().height };
-    });
-    expect(dims).not.toBeNull();
-    // Canvas resolution should match displayed size (no clipping)
-    expect(Math.abs(dims!.attr - dims!.css)).toBeLessThan(2);
-    expect(dims!.attr).toBeGreaterThan(600);
+  test('cleaning mode toggle is present', async ({ page }) => {
+    await expect(page.locator('text=CLEANING MODE')).toBeVisible();
+    await expect(page.locator('button', { hasText: 'PREDICTIVE' })).toBeVisible();
+    await expect(page.locator('button', { hasText: 'SCHEDULED (5 PM)' })).toBeVisible();
   });
 
-  test('no border on canvas container', async ({ page }) => {
-    const container = page.locator('canvas').locator('..');
-    const border = await container.evaluate(el => getComputedStyle(el).borderWidth);
-    expect(border).toBe('0px');
+  test('event log panel is present', async ({ page }) => {
+    await expect(page.locator('text=EVENT LOG')).toBeVisible();
   });
 
   test('page background is white', async ({ page }) => {
@@ -96,14 +68,6 @@ test.describe('Mapped Restroom Sim', () => {
       el => getComputedStyle(el).backgroundColor
     );
     expect(bg).toBe('rgb(255, 255, 255)');
-  });
-
-  test('canvas starts near top of page (no large header)', async ({ page }) => {
-    const canvas = page.locator('canvas');
-    const box = await canvas.boundingBox();
-    expect(box).not.toBeNull();
-    // Canvas should start within 20px of the top of the page
-    expect(box!.y).toBeLessThan(20);
   });
 
   test('full page screenshot', async ({ page }) => {

@@ -9,6 +9,7 @@ export enum RoomType {
   RESTROOM_FAM = 'RESTROOM_FAM', // Family
   MEETING_ROOM = 'MEETING_ROOM',
   BREAK_AREA = 'BREAK_AREA',
+  JANITOR_CLOSET = 'JANITOR_CLOSET',
   PATH = 'PATH'
 }
 
@@ -34,12 +35,14 @@ export enum NPCState {
   EATING = 'EATING',
   RESTROOM = 'RESTROOM',
   MEETING = 'MEETING',
+  CLEANING = 'CLEANING',
   BREAK = 'BREAK'
 }
 
 export interface NPC {
   id: string;
   name: string;
+  npcType?: 'EMPLOYEE' | 'JANITOR'; // defaults to EMPLOYEE
   x: number;
   y: number;
   targetX: number;
@@ -64,18 +67,35 @@ export interface ScheduledMeeting {
   attendeeIds: string[];  // NPC IDs assigned to this meeting
 }
 
+export interface WorkOrder {
+  id: string;              // e.g. "WO-001"
+  restroomId: string;      // which restroom needs cleaning
+  createdAt: number;       // sim time when created
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+}
+
+export interface RestroomStatus {
+  roomId: string;
+  usageCount: number;      // ENTER events since last cleaning
+  lastCleanedAt: number;   // sim time of last clean completion
+  isBeingCleaned: boolean; // true while janitor is cleaning
+}
+
 export interface SimState {
   time: number; // minutes from midnight
   day: number;
   npcs: NPC[];
   rooms: Room[];
   meetings: ScheduledMeeting[];
+  workOrders: WorkOrder[];
+  restroomStatuses: RestroomStatus[];
+  predictiveMode: boolean;
   speedMultiplier: number;
   isResetting: boolean;
 }
 
 export type SimEvent = {
-  type: 'ENTER' | 'EXIT';
+  type: 'ENTER' | 'EXIT' | 'WORK_ORDER_CREATED' | 'CLEANING_STARTED' | 'CLEANING_COMPLETED';
   restroomId: string;
   npcId: string;
   timestamp: number;
