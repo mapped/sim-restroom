@@ -155,8 +155,13 @@ export function computePredictions(
       status.usageCount, rate, currentTime
     );
 
+    // Surge is relevant only if: we're before the surge window, the threshold
+    // is predicted to be hit around the surge, AND usage is significant enough
+    // that the surge actually matters (not freshly cleaned).
     const surgeExpected = currentTime < SURGE_END &&
-      (predictedThresholdTime != null && predictedThresholdTime >= SURGE_START - 30);
+      predictedThresholdTime != null &&
+      predictedThresholdTime >= SURGE_START - 30 &&
+      status.usageCount >= JANITORIAL_RULES.cleaningThreshold * 0.3;
 
     const suggestedCleanTime = computeSuggestedCleanTime(
       predictedThresholdTime, status.usageCount, currentTime
