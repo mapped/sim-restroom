@@ -65,7 +65,7 @@ export default function App() {
     workOrders: [],
     restroomStatuses: createInitialRestroomStatuses(),
     predictiveMode: true,
-    speedMultiplier: 60,
+    speedMultiplier: 300,
     isResetting: false,
   }));
 
