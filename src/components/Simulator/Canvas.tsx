@@ -122,10 +122,12 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
           break;
       }
 
-      // Restroom being cleaned — persistent red tint (not fading flash)
+      // Restroom being cleaned — pulsing red-to-white
       const restroomStatus = state.restroomStatuses?.find(s => s.roomId === room.id);
       if (restroomStatus?.isBeingCleaned) {
-        baseColor = 'rgba(239, 68, 68, 0.25)';
+        const pulse = (Math.sin(Date.now() / 400) + 1) / 2; // 0..1 oscillation
+        const alpha = 0.15 + pulse * 0.25; // pulses between 0.15 and 0.40
+        baseColor = `rgba(239, 68, 68, ${alpha})`;
       }
 
       if (room.flashColor && room.flashTimer! > 0) {
