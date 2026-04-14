@@ -1,4 +1,6 @@
-import { Room, RoomType, NPC, NPCState, Point, SimState, SimEvent, ScheduledMeeting, WorkOrder, RestroomStatus } from '@/types/sim';
+import { Room, RoomType, NPC, NPCState, Point, SimState, SimEvent, ScheduledMeeting, WorkOrder, RestroomStatus, RestroomPrediction } from '@/types/sim';
+import { SIM_CONFIG, MEETING_RULES, JANITORIAL_RULES } from '@/simulation/config';
+import { computePredictions, maybeCreatePreemptiveWorkOrders } from '@/simulation/prediction';
 
 // ============================================================================
 // ROOM REGISTRY — Single source of truth for all room ↔ NPC relationships
@@ -63,39 +65,11 @@ function registryValidate(reg: RoomRegistry): boolean {
   return true;
 }
 
-// ============================================================================
-// CONFIGURATION
-// ============================================================================
+// Config is in config.ts (shared with prediction.ts to avoid circular imports)
+// Re-export for backward compatibility with existing imports
+export { SIM_CONFIG, MEETING_RULES, JANITORIAL_RULES } from '@/simulation/config';
 
 const GRID_SIZE = 40;
-
-export const SIM_CONFIG = {
-  RESTROOM_VISITS_PER_DAY: 5,
-  RESTROOM_DURATION_MIN: 3,
-  RESTROOM_DURATION_MAX: 10,
-  WORK_DAY_START: 360, // 6 AM
-  WORK_DAY_END: 1080,  // 6 PM
-  ALL_HANDS_TIME: 780,  // 1 PM
-  ALL_HANDS_DURATION: 10,
-  LOUNGE_PROBABILITY: 0.000001,
-};
-
-export const MEETING_RULES = {
-  attendeesMin: 2,
-  attendeesMax: 4,
-  durations: [5, 15] as number[],
-  boundaryInterval: 5,
-  roomIds: ['MEET-001', 'MEET-002'],
-};
-
-export const JANITORIAL_RULES = {
-  cleaningThreshold: 20,     // uses before work order in predictive mode
-  dirtyThreshold: 25,        // uses before sad face
-  cleaningDuration: 5,       // minutes to clean
-  scheduledCleanTime: 1020,  // 5:00 PM for scheduled mode
-  janitorClosetId: 'JAN-CLOSET',
-  restroomIds: ['REST-001', 'REST-002'],
-};
 
 // ============================================================================
 // ROOM LAYOUT
@@ -716,6 +690,7 @@ function processNPC(
 export function updateSimulation(
   state: SimState,
   deltaTime: number,
+  eventHistory: SimEvent[] = [],
 ): { nextState: SimState; events: SimEvent[] } {
   if (state.isResetting) return { nextState: state, events: [] };
 
@@ -759,10 +734,23 @@ export function updateSimulation(
     return processNPC(npc, registry, roomsById, updatedMeetings, mutableStatuses, ctx, collectedEvents, flashUpdates);
   });
 
-  // 4. Update restroom statuses from ENTER events (predictive mode creates work orders)
-  const { statuses: finalStatuses, workOrders: finalOrders } = updateRestroomStatuses(
+  // 4. Update restroom statuses from ENTER events (reactive work orders)
+  const { statuses: finalStatuses, workOrders: reactiveOrders } = updateRestroomStatuses(
     mutableStatuses, collectedEvents, mutableOrders, state.predictiveMode, newTime, collectedEvents
   );
+
+  // 5. Predictions and pre-emptive work orders (predictive mode only)
+  let finalPredictions: RestroomPrediction[] = [];
+  let finalOrders = reactiveOrders;
+
+  if (state.predictiveMode) {
+    // Combine accumulated history with this tick's events for the most up-to-date view
+    const allEvents = [...eventHistory, ...collectedEvents];
+    finalPredictions = computePredictions(finalStatuses, allEvents, newTime);
+    finalOrders = maybeCreatePreemptiveWorkOrders(
+      finalPredictions, finalOrders, finalStatuses, newTime, collectedEvents
+    );
+  }
 
   if (!registryValidate(registry)) {
     console.error('REGISTRY VALIDATION FAILED at time', newTime);
@@ -801,6 +789,7 @@ export function updateSimulation(
       meetings: updatedMeetings,
       workOrders: finalOrders,
       restroomStatuses: finalStatuses,
+      predictions: finalPredictions,
     },
     events: collectedEvents,
   };

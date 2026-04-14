@@ -81,6 +81,15 @@ export interface RestroomStatus {
   isBeingCleaned: boolean; // true while janitor is cleaning
 }
 
+export interface RestroomPrediction {
+  roomId: string;
+  predictedThresholdTime: number | null;  // sim-minutes when threshold will be hit
+  suggestedCleanTime: number | null;      // sim-minutes when janitor should be dispatched
+  baseRate: number;                        // uses per sim-minute (rolling average)
+  surgeExpected: boolean;                  // upcoming all-hands will cause a rush
+  confidence: 'low' | 'medium' | 'high';
+}
+
 export interface SimState {
   time: number; // minutes from midnight
   day: number;
@@ -89,6 +98,7 @@ export interface SimState {
   meetings: ScheduledMeeting[];
   workOrders: WorkOrder[];
   restroomStatuses: RestroomStatus[];
+  predictions: RestroomPrediction[];
   predictiveMode: boolean;
   speedMultiplier: number;
   preCleaningSpeed?: number; // speed to restore after cleaning slowdown
