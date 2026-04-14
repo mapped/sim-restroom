@@ -74,7 +74,6 @@ export default function App() {
   const requestRef = useRef<number>(null);
   const pendingEventsRef = useRef<SimEvent[]>([]);
   const fastForwardRef = useRef<{ target: number } | null>(null);
-  const cleaningSlowdownRef = useRef<{ restoreSpeed: number } | null>(null);
 
   const formatTime = (mins: number) => {
     const h = Math.floor(mins / 60);
@@ -112,20 +111,15 @@ export default function App() {
         fastForwardRef.current = null;
       }
 
-      // Auto-slowdown during cleaning: check isBeingCleaned flag (not events)
-      // to avoid React double-invocation issues.
+      // Auto-slowdown during cleaning — entirely in state (refs don't survive
+      // React's double-invocation of setState updaters).
       const anyCleaning = result.restroomStatuses.some(s => s.isBeingCleaned);
 
-      if (anyCleaning && !cleaningSlowdownRef.current && result.speedMultiplier >= 300) {
-        // Janitor just started cleaning — slow down to Fast
-        cleaningSlowdownRef.current = { restoreSpeed: result.speedMultiplier };
-        return { ...result, speedMultiplier: 60 };
+      if (anyCleaning && !result.preCleaningSpeed && result.speedMultiplier >= 300) {
+        return { ...result, preCleaningSpeed: result.speedMultiplier, speedMultiplier: 60 };
       }
-      if (!anyCleaning && cleaningSlowdownRef.current) {
-        // Cleaning finished — restore speed
-        const restore = cleaningSlowdownRef.current.restoreSpeed;
-        cleaningSlowdownRef.current = null;
-        return { ...result, speedMultiplier: restore };
+      if (!anyCleaning && result.preCleaningSpeed) {
+        return { ...result, speedMultiplier: result.preCleaningSpeed, preCleaningSpeed: undefined };
       }
 
       return result;
@@ -171,8 +165,7 @@ export default function App() {
   }, [state.isResetting]);
 
   const handleSetSpeed = (speed: number) => {
-    cleaningSlowdownRef.current = null; // cancel any auto-slowdown
-    setState(prev => ({ ...prev, speedMultiplier: speed }));
+    setState(prev => ({ ...prev, speedMultiplier: speed, preCleaningSpeed: undefined }));
   };
 
   const handleTogglePredictive = (enabled: boolean) => {

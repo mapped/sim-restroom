@@ -91,6 +91,7 @@ export interface SimState {
   restroomStatuses: RestroomStatus[];
   predictiveMode: boolean;
   speedMultiplier: number;
+  preCleaningSpeed?: number; // speed to restore after cleaning slowdown
   isResetting: boolean;
 }
 
