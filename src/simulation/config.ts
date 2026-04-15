@@ -17,9 +17,17 @@ export const SIM_CONFIG = {
 export const MEETING_RULES = {
   attendeesMin: 2,
   attendeesMax: 4,
-  durations: [5, 15] as number[],
-  boundaryInterval: 5,
+  durations: [15, 30, 45, 60] as number[], // 15 min to 1 hour
+  slotInterval: 30,          // Schedule slots every 30 minutes
+  meetingWindowStart: 540,   // 9:00 AM — first meeting can start here
+  meetingWindowEnd: 1020,    // 5:00 PM — last meeting must end by here
+  emptySlotProbability: 0.3, // 30% chance a slot has no meeting
   roomIds: ['MEET-001', 'MEET-002'],
+  // Guest settings (applied to most meetings)
+  guestProbability: 0.85,    // 85% of meetings have external guests
+  guestCountMin: 1,
+  guestCountMax: 3,
+  guestArrivalLeadTime: 5,   // MEETING_GUEST arrives this many sim-minutes before meeting start
 };
 
 export const JANITORIAL_RULES = {

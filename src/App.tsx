@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SimState, SimEvent, Room, NPCState } from '@/types/sim';
-import { INITIAL_ROOMS, createNPC, createJanitorNPC, createInitialRestroomStatuses, updateSimulation, getDeskIdForNPC, resetGuestCounter, JANITORIAL_RULES, SIM_CONFIG, LIFECYCLE_RULES } from '@/simulation/engine';
+import { INITIAL_ROOMS, createNPC, createJanitorNPC, createInitialRestroomStatuses, updateSimulation, getDeskIdForNPC, resetGuestCounter, resetMeetingGuestCounter, JANITORIAL_RULES, SIM_CONFIG, LIFECYCLE_RULES } from '@/simulation/engine';
 import { IsometricRenderer } from '@/components/Simulator/Canvas';
 import { Controls } from '@/components/Simulator/Controls';
 import { Badge } from '@/components/ui/badge';
@@ -190,11 +190,12 @@ export default function App() {
             restroomStatuses: createInitialRestroomStatuses(),
             predictions: [],
             npcs: prev.npcs
-              .filter(n => n.npcType !== 'GUEST') // clear guests
+              .filter(n => n.npcType !== 'GUEST' && n.npcType !== 'MEETING_GUEST') // clear transient NPCs
               .map(npc => resetNPC(npc, cleanRooms, [0, 0.3], 'DAY_START')),
           };
         });
         resetGuestCounter();
+        resetMeetingGuestCounter();
       }, 2000);
       return () => clearTimeout(timer);
     }
@@ -234,7 +235,7 @@ export default function App() {
           predictions: [],
           // Resetting to next day at 6 AM — employees AWAY, arrive during fast-forward
           npcs: prev.npcs
-            .filter(n => n.npcType !== 'GUEST')
+            .filter(n => n.npcType !== 'GUEST' && n.npcType !== 'MEETING_GUEST')
             .map(npc => resetNPC(npc, cleanRooms, [0, 0.3], 'DAY_START')),
         };
       }

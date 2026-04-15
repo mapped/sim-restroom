@@ -22,7 +22,8 @@ test.describe('Mapped Restroom Sim', () => {
   });
 
   test('time overlay is visible on canvas', async ({ page }) => {
-    await expect(page.locator('text=/\\d+:\\d+ [AP]M/')).toBeVisible();
+    // Use the specific class to avoid matching event log timestamps
+    await expect(page.locator('.text-3xl.font-mono').filter({ hasText: /\d+:\d+ [AP]M/ })).toBeVisible();
   });
 
   test('canvas is rendered with content', async ({ page }) => {
