@@ -9,9 +9,21 @@ import { INITIAL_ROOMS, createNPC, createJanitorNPC, createInitialRestroomStatus
 import { IsometricRenderer } from '@/components/Simulator/Canvas';
 import { Controls } from '@/components/Simulator/Controls';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Play, Pause } from 'lucide-react';
 
 const POPULATION = 20;
 const FAST_FORWARD_SPEED = 10000; // hyper speed multiplier during fast-forward
+
+const SPEED_CYCLE = [
+  { label: 'Real Time', value: 1 },
+  { label: 'Fast (1m/s)', value: 60 },
+  { label: 'Lightning (5m/s)', value: 300 },
+];
+
+function speedLabelFor(value: number): string {
+  return SPEED_CYCLE.find(o => o.value === value)?.label ?? `${value}x`;
+}
 
 function makeCleanRooms(): Room[] {
   return INITIAL_ROOMS.map(r => ({ ...r, occupancy: [], flashColor: null as Room['flashColor'], flashTimer: 0 }));
@@ -184,6 +196,9 @@ export default function App() {
             time: 360,
             day: prev.day + 1,
             isResetting: false,
+            endOfDayPhase: 'IDLE',
+            endOfDayPhaseDay: prev.day + 1,
+            waveEndTime: undefined,
             rooms: cleanRooms,
             meetings: [],
             workOrders: [],
@@ -201,6 +216,18 @@ export default function App() {
     }
   }, [state.isResetting]);
 
+  const togglePause = useCallback(() => {
+    setState(prev => ({ ...prev, isPaused: !prev.isPaused }));
+  }, []);
+
+  const cycleSpeed = useCallback(() => {
+    setState(prev => {
+      const idx = SPEED_CYCLE.findIndex(o => o.value === prev.speedMultiplier);
+      const next = SPEED_CYCLE[(idx + 1) % SPEED_CYCLE.length];
+      return { ...prev, speedMultiplier: next.value, preCleaningSpeed: undefined };
+    });
+  }, []);
+
   const handleSetSpeed = (speed: number) => {
     setState(prev => ({ ...prev, speedMultiplier: speed, preCleaningSpeed: undefined }));
   };
@@ -209,7 +236,32 @@ export default function App() {
     setState(prev => ({ ...prev, predictiveMode: enabled }));
   };
 
-  const skipToAllHands = () => {
+  const skipToAllHandsRef = useRef<(() => void) | null>(null);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Don't hijack when typing in an input
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePause();
+      } else if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        skipToAllHandsRef.current?.();
+      } else if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        cycleSpeed();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [togglePause, cycleSpeed]);
+
+  const skipToAllHands = useCallback(() => {
     const targetTime = SIM_CONFIG.ALL_HANDS_TIME - 5; // 5 min before all-hands
 
     setState(prev => {
@@ -228,6 +280,9 @@ export default function App() {
           day: prev.day + 1,
           time: 360,
           isResetting: false,
+          endOfDayPhase: 'IDLE',
+          endOfDayPhaseDay: prev.day + 1,
+          waveEndTime: undefined,
           rooms: cleanRooms,
           meetings: [],
           workOrders: [],
@@ -240,7 +295,9 @@ export default function App() {
         };
       }
     });
-  };
+  }, []);
+
+  skipToAllHandsRef.current = skipToAllHands;
 
   return (
     <div className="min-h-screen bg-white font-sans">
@@ -249,10 +306,40 @@ export default function App() {
           <div className="relative">
             <IsometricRenderer state={state} />
 
+            {/* Speed overlay (top-left, aligned with clock vertically) */}
+            <div className="absolute top-[8%] left-[4%] flex flex-col items-start gap-2 z-10">
+              <div
+                className="bg-white/90 backdrop-blur-sm border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] px-3 py-1.5 font-mono"
+                title="Press S to cycle speed"
+              >
+                <div className="text-[9px] text-slate-500 uppercase tracking-wider">Speed</div>
+                <div className="text-sm font-bold text-blue-600">{speedLabelFor(state.speedMultiplier)}</div>
+              </div>
+              {state.isPaused && (
+                <Badge className="bg-slate-900 text-white font-mono px-3 py-1">
+                  PAUSED
+                </Badge>
+              )}
+            </div>
+
             {/* Time overlay */}
             <div className="absolute top-[8%] right-[4%] flex flex-col items-end gap-2 z-10">
-              <div className="text-3xl font-mono font-bold text-slate-800 bg-white/90 backdrop-blur-sm px-3 py-1.5 border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)]">
-                {formatTime(state.time)}
+              <div className="flex items-stretch gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label={state.isPaused ? 'Resume' : 'Pause'}
+                  title={state.isPaused ? 'Resume (Space)' : 'Pause (Space)'}
+                  className="h-auto w-12 bg-white/90 backdrop-blur-sm border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
+                  onClick={togglePause}
+                >
+                  {state.isPaused
+                    ? <Play className="w-5 h-5" fill="currentColor" />
+                    : <Pause className="w-5 h-5" fill="currentColor" />}
+                </Button>
+                <div className="text-3xl font-mono font-bold text-slate-800 bg-white/90 backdrop-blur-sm px-3 py-1.5 border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)]">
+                  {formatTime(state.time)}
+                </div>
               </div>
               {fastForwardRef.current && (
                 <Badge className="bg-yellow-500 text-black font-mono px-3 py-1 animate-pulse">

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,16 @@ const EVENT_BADGE_STYLES: Record<string, string> = {
   OCCUPANCY_COUNT: 'border-blue-500 text-blue-400',
 };
 
+const EVENT_FILTERS: { key: string; label: string }[] = [
+  { key: 'ALL', label: 'All' },
+  { key: 'ENTER', label: 'Enter' },
+  { key: 'EXIT', label: 'Exit' },
+  { key: 'WORK_ORDER_CREATED', label: 'Work Order' },
+  { key: 'CLEANING_STARTED', label: 'Cleaning' },
+  { key: 'CLEANING_COMPLETED', label: 'Done' },
+  { key: 'OCCUPANCY_COUNT', label: 'Occupancy' },
+];
+
 export const Controls: React.FC<ControlsProps> = ({
   speed, predictiveMode,
   onSetSpeed, onSkipToAllHands, onTogglePredictive, events
@@ -38,6 +48,48 @@ export const Controls: React.FC<ControlsProps> = ({
     const ampm = h >= 12 ? 'PM' : 'AM';
     const displayH = h % 12 || 12;
     return `${displayH}:${m.toString().padStart(2, '0')} ${ampm}`;
+  };
+
+  const [filter, setFilter] = useState<string>('ALL');
+  const filteredEvents = useMemo(
+    () => filter === 'ALL' ? events : events.filter(e => e.type === filter),
+    [events, filter]
+  );
+
+  // Newest-first, cap history at 200 for scroll performance
+  const visible = useMemo(
+    () => filteredEvents.slice(-200).reverse(),
+    [filteredEvents]
+  );
+
+  // Scroll lock: when user scrolls away from the top (newest), suppress the
+  // automatic snap-back so they can keep reading older events. When they scroll
+  // back to the top, follow-mode re-engages and new events appear normally.
+  const logRef = useRef<HTMLDivElement>(null);
+  const prevScrollHeightRef = useRef(0);
+  const [followMode, setFollowMode] = useState(true);
+  const followModeRef = useRef(followMode);
+  useEffect(() => { followModeRef.current = followMode; }, [followMode]);
+
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    const prev = prevScrollHeightRef.current;
+    const next = el.scrollHeight;
+    const delta = next - prev;
+    if (!followModeRef.current && delta > 0 && el.scrollTop > 0) {
+      // Preserve viewing position: newest items added at top push content down;
+      // compensate so the user keeps seeing the same row.
+      el.scrollTop += delta;
+    }
+    prevScrollHeightRef.current = next;
+  }, [visible]);
+
+  const handleScroll = () => {
+    const el = logRef.current;
+    if (!el) return;
+    const atTop = el.scrollTop <= 2;
+    setFollowMode(atTop);
   };
 
   return (
@@ -103,21 +155,66 @@ export const Controls: React.FC<ControlsProps> = ({
               <FastForward className="w-4 h-4 mr-2" /> SKIP TO ALL-HANDS
             </Button>
           </div>
+
+          {/* Keyboard shortcut hints */}
+          <div className="px-2 pt-1">
+            <div className="text-[9px] font-mono text-slate-500 uppercase tracking-wider mb-1">Shortcuts</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-slate-600">
+              <span><kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">Space</kbd> pause / resume</span>
+              <span><kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">A</kbd> jump to meeting</span>
+              <span><kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">S</kbd> cycle speed</span>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
       {/* Event Log */}
       <Card className="bg-slate-900 border-2 border-slate-800 text-slate-100 shadow-[4px_4px_0px_0px_rgba(30,41,59,1)]">
         <CardHeader className="pb-2 border-b border-slate-800">
-          <CardTitle className="text-xs font-mono flex items-center gap-2">
-            <List className="w-3 h-3" /> EVENT LOG
+          <CardTitle className="text-xs font-mono flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <List className="w-3 h-3" /> EVENT LOG
+            </span>
+            {!followMode && (
+              <button
+                className="text-[9px] font-mono bg-yellow-500 text-black px-2 py-0.5 rounded hover:bg-yellow-400"
+                onClick={() => {
+                  const el = logRef.current;
+                  if (el) el.scrollTop = 0;
+                  setFollowMode(true);
+                }}
+                title="Resume follow mode"
+              >
+                PAUSED · JUMP TO TOP
+              </button>
+            )}
           </CardTitle>
+          {/* Filter chips */}
+          <div className="flex flex-wrap gap-1 pt-2">
+            {EVENT_FILTERS.map(f => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`text-[9px] font-mono px-2 py-0.5 rounded border transition-colors ${
+                  filter === f.key
+                    ? 'bg-blue-500 border-blue-400 text-white'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="h-[250px] overflow-y-auto font-mono text-[10px] p-4 space-y-2">
-            {events.length === 0 && <div className="text-slate-500 italic">Waiting for events...</div>}
-            {events.slice(-20).reverse().map((e, i) => (
-              <div key={i} className="flex items-center gap-2 border-b border-slate-800/50 pb-1">
+          <div
+            ref={logRef}
+            onScroll={handleScroll}
+            className="h-[250px] overflow-y-auto font-mono text-[10px] p-4 space-y-2"
+          >
+            {visible.length === 0 && <div className="text-slate-500 italic">Waiting for events...</div>}
+            {visible.map((e, i) => (
+              <div key={`${e.timestamp}-${i}-${e.type}`} className="flex items-center gap-2 border-b border-slate-800/50 pb-1">
                 <span className="text-slate-500">[{formatTime(e.timestamp)}]</span>
                 <Badge variant="outline" className={`text-[8px] py-0 h-4 ${EVENT_BADGE_STYLES[e.type] || 'border-slate-500 text-slate-400'}`}>
                   {e.type.replace(/_/g, ' ')}

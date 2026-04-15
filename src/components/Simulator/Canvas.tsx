@@ -509,6 +509,79 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
         ctx.textAlign = 'center';
         ctx.fillText('\u{1F9F9}', px + w / 2 + 8, py + TILE_HEIGHT / 2 - h - w / 2 + pulse); // broom emoji
       }
+
+      // Waving goodbye (janitor at the end of the day)
+      if (isJanitor && npc.state === 'WAVING') {
+        const wiggle = Math.sin(Date.now() / 120) * 5;
+        const headY = py + TILE_HEIGHT / 2 - h - w / 2;
+
+        // Waving hand — emoji, offset toward the wave side
+        ctx.save();
+        ctx.font = '18px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('\u{1F44B}', px + w / 2 + 8 + wiggle * 0.5, headY - 2);
+        ctx.restore();
+
+        // Cute speech bubble: "Bye!"
+        const bubbleText = 'Bye!';
+        ctx.save();
+        ctx.font = 'bold 10px system-ui, sans-serif';
+        const metrics = ctx.measureText(bubbleText);
+        const padX = 6, padY = 3;
+        const bw = metrics.width + padX * 2;
+        const bh = 14 + padY;
+        const bx = px - bw / 2;
+        const by = headY - w / 2 - bh - 8;
+
+        // Bubble body
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        if ((ctx as any).roundRect) {
+          (ctx as any).roundRect(bx, by, bw, bh, 6);
+        } else {
+          ctx.rect(bx, by, bw, bh);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        // Tail
+        ctx.beginPath();
+        ctx.moveTo(px - 3, by + bh);
+        ctx.lineTo(px, by + bh + 5);
+        ctx.lineTo(px + 3, by + bh);
+        ctx.closePath();
+        ctx.fillStyle = 'white';
+        ctx.fill();
+        ctx.strokeStyle = '#1e293b';
+        ctx.stroke();
+        // Cover the tail's top border with white
+        ctx.beginPath();
+        ctx.strokeStyle = 'white';
+        ctx.moveTo(px - 3, by + bh);
+        ctx.lineTo(px + 3, by + bh);
+        ctx.stroke();
+
+        // Text
+        ctx.fillStyle = '#1e293b';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(bubbleText, px, by + bh / 2);
+
+        // Sparkles around janitor for cuteness
+        const t = Date.now() / 300;
+        ctx.fillStyle = '#fbbf24';
+        for (let s = 0; s < 3; s++) {
+          const ang = t + s * (Math.PI * 2 / 3);
+          const sx = px + Math.cos(ang) * 18;
+          const sy = headY + Math.sin(ang) * 10;
+          ctx.font = '10px serif';
+          ctx.fillText('\u2728', sx, sy);
+        }
+        ctx.restore();
+      }
     });
 
     ctx.restore();

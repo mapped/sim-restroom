@@ -953,10 +953,13 @@ export function updateSimulation(
 ): { nextState: SimState; events: SimEvent[] } {
   if (state.isResetting) return { nextState: state, events: [] };
 
+  if (state.isPaused) return { nextState: state, events: [] };
+
   const deltaMins = (deltaTime / 1000 / 60) * state.speedMultiplier;
   const newTime = state.time + deltaMins;
 
-  if (newTime >= SIM_CONFIG.WORK_DAY_END) {
+  // Safety fallback: force reset well past close if end-of-day sequence stalled
+  if (newTime >= SIM_CONFIG.WORK_DAY_END + 120) {
     return { nextState: { ...state, isResetting: true, time: SIM_CONFIG.WORK_DAY_END }, events: [] };
   }
 
@@ -1048,6 +1051,122 @@ export function updateSimulation(
     console.error('REGISTRY VALIDATION FAILED at time', newTime);
   }
 
+  // ─── End-of-day phase management ───
+  // Detect: all employees/guests have departed (AWAY and past departureTime, or
+  // filtered out of the list entirely). Janitor stays.
+  let endOfDayPhase = state.endOfDayPhaseDay === state.day ? state.endOfDayPhase : 'IDLE';
+  let waveEndTime = state.waveEndTime;
+  let isResetting = state.isResetting;
+  let finalOrdersWithEOD = finalOrders;
+
+  const officeClosedCandidate = newTime >= LIFECYCLE_RULES.employeeDepartureStart;
+  const anyEmployeesInBuilding = updatedNPCs.some(n =>
+    (n.npcType === 'EMPLOYEE' || n.npcType === 'GUEST' || n.npcType === 'MEETING_GUEST') &&
+    n.state !== NPCState.AWAY
+  );
+  const officeEmpty = officeClosedCandidate && !anyEmployeesInBuilding;
+
+  if (officeEmpty && (!endOfDayPhase || endOfDayPhase === 'IDLE')) {
+    // Dispatch end-of-day cleaning orders for any restroom not already queued/cleaning
+    const orders = [...finalOrdersWithEOD];
+    for (const roomId of JANITORIAL_RULES.restroomIds) {
+      const hasOrder = orders.some(wo =>
+        wo.restroomId === roomId && (wo.status === 'PENDING' || wo.status === 'IN_PROGRESS')
+      );
+      const status = finalStatuses.find(s => s.roomId === roomId);
+      const alreadyClean = status && status.usageCount === 0 && !status.isBeingCleaned && status.lastCleanedAt >= LIFECYCLE_RULES.employeeDepartureStart;
+      if (!hasOrder && !alreadyClean) {
+        const wo = createWorkOrder(roomId, 'END_OF_DAY', newTime, state.day);
+        orders.push(wo);
+        emitWorkOrderCreated(collectedEvents, wo, newTime);
+      }
+    }
+    finalOrdersWithEOD = orders;
+    endOfDayPhase = 'JANITOR_DISPATCHED';
+  }
+
+  // Once dispatched, check if all cleaning is complete and janitor is at closet
+  if (endOfDayPhase === 'JANITOR_DISPATCHED') {
+    const pendingOrInProgress = finalOrdersWithEOD.some(wo =>
+      wo.status === 'PENDING' || wo.status === 'IN_PROGRESS'
+    );
+    const janitor = updatedNPCs.find(n => n.npcType === 'JANITOR');
+    const janitorAtCloset = janitor?.currentRoomId === JANITORIAL_RULES.janitorClosetId && janitor.state === NPCState.IDLE;
+    if (!pendingOrInProgress && janitorAtCloset && janitor) {
+      // Send janitor to a spot just inside the lobby to wave goodbye
+      const lobby = roomsById.get(LIFECYCLE_RULES.lobbyId);
+      if (lobby) {
+        const waveSpot = { x: Math.round(lobby.x + lobby.width / 2), y: Math.max(0, lobby.y - 2) };
+        const updatedJanitor: NPC = {
+          ...janitor,
+          state: NPCState.WALKING,
+          targetX: waveSpot.x,
+          targetY: waveSpot.y,
+          targetRoomId: undefined,
+          path: findPath({ x: janitor.x, y: janitor.y }, waveSpot),
+          isExiting: false,
+        };
+        // Exit janitor from closet registry entry (persist by writing undefined currentRoomId)
+        updatedJanitor.currentRoomId = undefined;
+        updatedNPCs = updatedNPCs.map(n => n.id === janitor.id ? updatedJanitor : n);
+        endOfDayPhase = 'JANITOR_WAVING';
+      }
+    }
+  }
+
+  // Detect janitor arriving at wave spot → start wave
+  if (endOfDayPhase === 'JANITOR_WAVING') {
+    const janitor = updatedNPCs.find(n => n.npcType === 'JANITOR');
+    if (janitor && waveEndTime == null) {
+      const lobby = roomsById.get(LIFECYCLE_RULES.lobbyId);
+      if (lobby) {
+        const waveSpot = { x: Math.round(lobby.x + lobby.width / 2), y: Math.max(0, lobby.y - 2) };
+        const atSpot = Math.abs(janitor.x - waveSpot.x) < 0.5 && Math.abs(janitor.y - waveSpot.y) < 0.5 && janitor.path.length === 0;
+        if (atSpot && janitor.state !== NPCState.WAVING) {
+          // Start waving
+          const updatedJanitor: NPC = {
+            ...janitor,
+            state: NPCState.WAVING,
+            path: [],
+            targetRoomId: undefined,
+            x: waveSpot.x,
+            y: waveSpot.y,
+          };
+          updatedNPCs = updatedNPCs.map(n => n.id === janitor.id ? updatedJanitor : n);
+          waveEndTime = newTime + 3; // 3 sim minutes of waving
+        }
+      }
+    } else if (janitor && waveEndTime != null && newTime >= waveEndTime && janitor.state === NPCState.WAVING) {
+      // Wave done — walk out the exit
+      const updatedJanitor: NPC = {
+        ...janitor,
+        state: NPCState.WALKING,
+        isExiting: true,
+        targetRoomId: undefined,
+        targetX: LIFECYCLE_RULES.entryPoint.x,
+        targetY: LIFECYCLE_RULES.entryPoint.y,
+        path: findPath({ x: janitor.x, y: janitor.y }, LIFECYCLE_RULES.entryPoint),
+      };
+      updatedNPCs = updatedNPCs.map(n => n.id === janitor.id ? updatedJanitor : n);
+      endOfDayPhase = 'JANITOR_LEAVING';
+    }
+  }
+
+  // Janitor leaving → detect arrival at entry point, then trigger day reset
+  if (endOfDayPhase === 'JANITOR_LEAVING') {
+    const janitor = updatedNPCs.find(n => n.npcType === 'JANITOR');
+    if (janitor) {
+      const atExit =
+        Math.abs(janitor.x - LIFECYCLE_RULES.entryPoint.x) < 0.5 &&
+        Math.abs(janitor.y - LIFECYCLE_RULES.entryPoint.y) < 0.5 &&
+        janitor.path.length === 0;
+      if (atExit) {
+        endOfDayPhase = 'DONE';
+        isResetting = true;
+      }
+    }
+  }
+
   // Emit OCCUPANCY_COUNT event when employee/guest counts change
   const prevEmployees = state.npcs.filter(n => n.npcType === 'EMPLOYEE' && n.state !== NPCState.AWAY).length;
   const prevGuests = state.npcs.filter(n => n.npcType === 'GUEST' && n.state !== NPCState.AWAY).length;
@@ -1093,10 +1212,14 @@ export function updateSimulation(
     nextState: {
       ...state,
       time: newTime,
+      isResetting,
+      endOfDayPhase,
+      endOfDayPhaseDay: state.day,
+      waveEndTime,
       npcs: updatedNPCs,
       rooms: finalRooms,
       meetings,
-      workOrders: finalOrders,
+      workOrders: finalOrdersWithEOD,
       restroomStatuses: finalStatuses,
       predictions: finalPredictions,
       dailyScheduleDay,

@@ -38,6 +38,7 @@ export enum NPCState {
   MEETING = 'MEETING',
   CLEANING = 'CLEANING',
   BREAK = 'BREAK',
+  WAVING = 'WAVING', // janitor waving goodbye before leaving for the day
   AWAY = 'AWAY' // not in the building (before arrival or after departure)
 }
 
@@ -80,7 +81,8 @@ export type WorkOrderReason =
   | 'THRESHOLD_REACHED'       // reactive: usage hit cleaning threshold
   | 'SCHEDULED_DAILY'         // non-predictive: 5 PM daily cleaning
   | 'PREDICTIVE_SURGE'        // predictive: upcoming all-hands/meeting surge
-  | 'PREDICTIVE_ETA';         // predictive: usage rate will breach threshold soon
+  | 'PREDICTIVE_ETA'          // predictive: usage rate will breach threshold soon
+  | 'END_OF_DAY';             // office emptied — final sanitation pass before janitor leaves
 
 export type WorkOrderPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -127,8 +129,15 @@ export interface SimState {
   predictiveMode: boolean;
   speedMultiplier: number;
   preCleaningSpeed?: number; // speed to restore after cleaning slowdown
+  isPaused?: boolean;
   isResetting: boolean;
   dailyScheduleDay?: number;           // Which day the current schedule was generated for
+  // End-of-day lifecycle: IDLE (normal), JANITOR_DISPATCHED (final cleaning
+  // orders issued), JANITOR_WAVING (janitor at lobby waving goodbye),
+  // JANITOR_LEAVING (janitor walking out), DONE (ready to reset).
+  endOfDayPhase?: 'IDLE' | 'JANITOR_DISPATCHED' | 'JANITOR_WAVING' | 'JANITOR_LEAVING' | 'DONE';
+  endOfDayPhaseDay?: number;             // Day the phase belongs to (resets each new day)
+  waveEndTime?: number;                  // Sim-time when the goodbye wave ends
 }
 
 export type SimEvent = {

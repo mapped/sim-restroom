@@ -67,6 +67,13 @@ function buildCopy(
         reasonDetail: `Predicted threshold ETA${ctx.thresholdTime != null ? ` ${fmt(ctx.thresholdTime)}` : ''}`,
         priority: 'MEDIUM',
       };
+    case 'END_OF_DAY':
+      return {
+        title: 'End-of-Day Closeout',
+        description: `Final sanitation of ${loc} after the office has emptied. Janitor locks up after both restrooms are serviced.`,
+        reasonDetail: 'Office closed — final sanitation pass',
+        priority: 'MEDIUM',
+      };
   }
 }
 
