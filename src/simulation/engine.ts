@@ -1,5 +1,5 @@
 import { Room, RoomType, NPC, NPCState, Point, SimState, SimEvent, ScheduledMeeting, WorkOrder, RestroomStatus, RestroomPrediction } from '@/types/sim';
-import { SIM_CONFIG, MEETING_RULES, JANITORIAL_RULES } from '@/simulation/config';
+import { SIM_CONFIG, MEETING_RULES, JANITORIAL_RULES, LIFECYCLE_RULES } from '@/simulation/config';
 import { computePredictions, maybeCreatePreemptiveWorkOrders } from '@/simulation/prediction';
 
 // ============================================================================
@@ -67,7 +67,7 @@ function registryValidate(reg: RoomRegistry): boolean {
 
 // Config is in config.ts (shared with prediction.ts to avoid circular imports)
 // Re-export for backward compatibility with existing imports
-export { SIM_CONFIG, MEETING_RULES, JANITORIAL_RULES } from '@/simulation/config';
+export { SIM_CONFIG, MEETING_RULES, JANITORIAL_RULES, LIFECYCLE_RULES } from '@/simulation/config';
 
 const GRID_SIZE = 40;
 
@@ -98,6 +98,7 @@ export const INITIAL_ROOMS: Room[] = [
   { id: 'MEET-001', type: RoomType.MEETING_ROOM, x: 2, y: 24, width: 6, height: 4, label: 'Meeting A', capacity: 6, occupancy: [], door: { x: 8, y: 26 } },
   { id: 'MEET-002', type: RoomType.MEETING_ROOM, x: 2, y: 30, width: 6, height: 4, label: 'Meeting B', capacity: 6, occupancy: [], door: { x: 8, y: 32 } },
   { id: 'JAN-CLOSET', type: RoomType.JANITOR_CLOSET, x: 2, y: 36, width: 2, height: 2, label: 'Janitor', capacity: 1, occupancy: [], door: { x: 4, y: 37 } },
+  { id: 'LOBBY', type: RoomType.LOBBY, x: 23, y: 37, width: 4, height: 2, label: 'Entrance', capacity: 0, occupancy: [], door: { x: 25, y: 37 } },
 ];
 
 // ============================================================================
@@ -112,21 +113,51 @@ export function getDeskIdForNPC(npcId: string): string {
 }
 
 export function createNPC(id: number): NPC {
-  const deskId = `DESK-${(id + 1).toString().padStart(3, '0')}`;
-  const desk = INITIAL_ROOMS.find(r => r.id === deskId);
+  // Employees arrive AWAY, with random arrival 6-9 AM and departure 4-6 PM
+  const arrivalTime = LIFECYCLE_RULES.employeeArrivalStart +
+    Math.random() * (LIFECYCLE_RULES.employeeArrivalEnd - LIFECYCLE_RULES.employeeArrivalStart);
+  const departureTime = LIFECYCLE_RULES.employeeDepartureStart +
+    Math.random() * (LIFECYCLE_RULES.employeeDepartureEnd - LIFECYCLE_RULES.employeeDepartureStart);
   return {
     id: `NPC-${id}`, name: `Employee ${id}`, npcType: 'EMPLOYEE',
-    x: desk?.x || 0, y: desk?.y || 0,
-    targetX: desk?.x || 0, targetY: desk?.y || 0,
-    state: NPCState.WORKING,
+    x: -100, y: -100, // off-screen while AWAY
+    targetX: 0, targetY: 0,
+    state: NPCState.AWAY,
     speed: 0.05 + Math.random() * 0.05,
     color: COLORS[Math.floor(Math.random() * COLORS.length)],
     skinColor: SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)],
     size: 0.8 + Math.random() * 0.4,
     restroomUrgency: Math.random() * 0.5,
     lastRestroomTime: SIM_CONFIG.WORK_DAY_START,
-    path: [], currentRoomId: deskId, targetRoomId: undefined, leaveTime: undefined,
+    arrivalTime,
+    departureTime,
+    path: [], currentRoomId: undefined, targetRoomId: undefined, leaveTime: undefined,
   };
+}
+
+let guestCounter = 0;
+export function createGuestNPC(currentTime: number): NPC {
+  const stayMinutes = LIFECYCLE_RULES.guestStayMin +
+    Math.random() * (LIFECYCLE_RULES.guestStayMax - LIFECYCLE_RULES.guestStayMin);
+  return {
+    id: `GUEST-${++guestCounter}`, name: `Guest ${guestCounter}`, npcType: 'GUEST',
+    x: LIFECYCLE_RULES.entryPoint.x, y: LIFECYCLE_RULES.entryPoint.y,
+    targetX: LIFECYCLE_RULES.entryPoint.x, targetY: LIFECYCLE_RULES.entryPoint.y,
+    state: NPCState.IDLE,
+    speed: 0.04 + Math.random() * 0.04,
+    color: '#64748b', // neutral slate
+    skinColor: SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)],
+    size: 0.9 + Math.random() * 0.3,
+    restroomUrgency: Math.random() * 0.3,
+    lastRestroomTime: currentTime,
+    arrivalTime: currentTime,
+    departureTime: currentTime + stayMinutes,
+    path: [], currentRoomId: undefined, targetRoomId: undefined, leaveTime: undefined,
+  };
+}
+
+export function resetGuestCounter() {
+  guestCounter = 0;
 }
 
 export function createJanitorNPC(): NPC {
@@ -204,7 +235,8 @@ function scheduleMeetings(
 
     const duration = MEETING_RULES.durations[Math.floor(Math.random() * MEETING_RULES.durations.length)];
     const available = npcs.filter(n =>
-      n.npcType !== 'JANITOR' &&
+      n.npcType === 'EMPLOYEE' &&
+      n.state !== NPCState.AWAY &&
       n.state === NPCState.WORKING &&
       registryGetRoom(registry, n.id)?.startsWith('DESK') &&
       !assignedIds.has(n.id)
@@ -486,6 +518,17 @@ function decidePostExitDestination(
   restroomStatuses: RestroomStatus[],
   ctx: TickContext,
 ): string {
+  // Guests don't go to all-hands or meetings, don't have a desk
+  if (npc.npcType === 'GUEST') {
+    if (npc.restroomUrgency > 0.8) {
+      const r = findAvailableRestroom(reg, roomsById, restroomStatuses);
+      if (r) return r;
+    }
+    // Wander to a random common area
+    const common = ['CAF-001', 'BREAK-001'];
+    return common[Math.floor(Math.random() * common.length)];
+  }
+
   if (ctx.isAllHandsTime) return 'AUD-001';
   if (npc.restroomUrgency > 0.8) {
     const r = findAvailableRestroom(reg, roomsById, restroomStatuses);
@@ -511,12 +554,50 @@ function processNPC(
   flashes: Map<string, { color: 'green' | 'red'; timer: number }>,
 ): NPC {
   const n: NPC = { ...npc, path: [...npc.path] };
+
+  // --- 0. AWAY state: check if it's time to arrive ---
+  if (n.state === NPCState.AWAY) {
+    if (n.arrivalTime != null && ctx.newTime >= n.arrivalTime) {
+      // Spawn at entrance and walk to desk
+      n.x = LIFECYCLE_RULES.entryPoint.x;
+      n.y = LIFECYCLE_RULES.entryPoint.y;
+      n.isExiting = false;
+      const deskId = getDeskIdForNPC(n.id);
+      sendToRoom(n, deskId, roomsById);
+    }
+    n.currentRoomId = registryGetRoom(registry, n.id);
+    return n;
+  }
+
   const currentRoomId = registryGetRoom(registry, n.id);
   const currentRoom = currentRoomId ? roomsById.get(currentRoomId) : undefined;
   const isInNonDeskRoom = currentRoomId != null && !currentRoomId.startsWith('DESK');
 
   // --- 1. Urgency ---
   n.restroomUrgency += ctx.deltaMins / 144;
+
+  // --- 1.5. Check departure time (employees) ---
+  if (!n.isExiting && n.departureTime != null && ctx.newTime >= n.departureTime) {
+    // Leave current room first, then head to exit
+    if (isInNonDeskRoom && currentRoom && n.state !== NPCState.WALKING) {
+      n.targetRoomId = currentRoomId;
+      n.targetX = currentRoom.door.x;
+      n.targetY = currentRoom.door.y;
+      n.state = NPCState.WALKING;
+      n.leaveTime = undefined;
+      n.isExiting = true;
+      n.path = findPath({ x: n.x, y: n.y }, currentRoom.door);
+    } else if ((n.state === NPCState.WORKING || n.state === NPCState.IDLE)) {
+      // At desk or idle — head straight to exit
+      if (currentRoomId) registryExit(registry, n.id);
+      n.isExiting = true;
+      n.targetRoomId = undefined;
+      n.targetX = LIFECYCLE_RULES.entryPoint.x;
+      n.targetY = LIFECYCLE_RULES.entryPoint.y;
+      n.state = NPCState.WALKING;
+      n.path = findPath({ x: n.x, y: n.y }, LIFECYCLE_RULES.entryPoint);
+    }
+  }
 
   // --- 2. Should leave current room? ---
   if (isInNonDeskRoom && n.state !== NPCState.WALKING) {
@@ -643,6 +724,15 @@ function processNPC(
         }
       }
     } else if (n.path.length === 0 && !n.targetRoomId) {
+      if (n.isExiting) {
+        // Arrived at exit — despawn
+        if (currentRoomId) registryExit(registry, n.id);
+        n.state = NPCState.AWAY;
+        n.x = -100; n.y = -100;
+        n.isExiting = false;
+        n.currentRoomId = undefined;
+        return n;
+      }
       n.state = NPCState.IDLE;
     }
   }
@@ -675,8 +765,18 @@ function processNPC(
 
   // --- 5. IDLE recovery ---
   if (n.state === NPCState.IDLE) {
-    sendToRoom(n, getDeskIdForNPC(n.id), roomsById);
+    if (n.npcType === 'GUEST') {
+      // Guests: wander to a random common area (cafeteria or lounge)
+      const common = ['CAF-001', 'BREAK-001'];
+      const dest = common[Math.floor(Math.random() * common.length)];
+      sendToRoom(n, dest, roomsById);
+    } else {
+      sendToRoom(n, getDeskIdForNPC(n.id), roomsById);
+    }
   }
+
+  // --- 5b. Guest wandering decision (when "working"/idle in a common area done) ---
+  // (No-op — handled via the state machine. Guests stay in EATING state until leaveTime.)
 
   // --- 6. Sync from registry ---
   n.currentRoomId = registryGetRoom(registry, n.id);
@@ -726,13 +826,25 @@ export function updateSimulation(
   const mutableStatuses = state.restroomStatuses.map(s => ({ ...s }));
   const mutableOrders = [...workOrders];
 
-  // 3. Process employee NPCs
-  const updatedNPCs = state.npcs.map(npc => {
+  // 3. Process all NPCs
+  let updatedNPCs = state.npcs.map(npc => {
     if (npc.npcType === 'JANITOR') {
       return processJanitorNPC(npc, registry, roomsById, mutableOrders, mutableStatuses, ctx, collectedEvents, flashUpdates);
     }
     return processNPC(npc, registry, roomsById, updatedMeetings, mutableStatuses, ctx, collectedEvents, flashUpdates);
   });
+
+  // 3b. Remove guests that have departed (AWAY after arriving)
+  updatedNPCs = updatedNPCs.filter(n => !(n.npcType === 'GUEST' && n.state === NPCState.AWAY));
+
+  // 3c. Spawn new guests (during guest window, under cap, random probability)
+  if (newTime >= LIFECYCLE_RULES.guestWindowStart && newTime < LIFECYCLE_RULES.guestWindowEnd) {
+    const guestCount = updatedNPCs.filter(n => n.npcType === 'GUEST').length;
+    const spawnChance = LIFECYCLE_RULES.guestSpawnProbability * state.speedMultiplier;
+    if (guestCount < LIFECYCLE_RULES.maxGuests && Math.random() < spawnChance) {
+      updatedNPCs.push(createGuestNPC(newTime));
+    }
+  }
 
   // 4. Update restroom statuses from ENTER events (reactive work orders)
   const { statuses: finalStatuses, workOrders: reactiveOrders } = updateRestroomStatuses(

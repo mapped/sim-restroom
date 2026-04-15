@@ -10,6 +10,7 @@ export enum RoomType {
   MEETING_ROOM = 'MEETING_ROOM',
   BREAK_AREA = 'BREAK_AREA',
   JANITOR_CLOSET = 'JANITOR_CLOSET',
+  LOBBY = 'LOBBY',
   PATH = 'PATH'
 }
 
@@ -36,13 +37,14 @@ export enum NPCState {
   RESTROOM = 'RESTROOM',
   MEETING = 'MEETING',
   CLEANING = 'CLEANING',
-  BREAK = 'BREAK'
+  BREAK = 'BREAK',
+  AWAY = 'AWAY' // not in the building (before arrival or after departure)
 }
 
 export interface NPC {
   id: string;
   name: string;
-  npcType?: 'EMPLOYEE' | 'JANITOR'; // defaults to EMPLOYEE
+  npcType?: 'EMPLOYEE' | 'JANITOR' | 'GUEST'; // defaults to EMPLOYEE
   x: number;
   y: number;
   targetX: number;
@@ -57,6 +59,9 @@ export interface NPC {
   currentRoomId?: string;   // Synced from RoomRegistry — read-only outside engine
   targetRoomId?: string;    // Room this NPC is walking toward
   leaveTime?: number;       // Sim-time when NPC should leave current room
+  arrivalTime?: number;     // Sim-time when NPC should arrive at office (employees/guests)
+  departureTime?: number;   // Sim-time when NPC should leave office
+  isExiting?: boolean;      // Walking toward exit (will despawn on arrival)
   path: Point[];
 }
 

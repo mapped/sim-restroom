@@ -30,3 +30,23 @@ export const JANITORIAL_RULES = {
   janitorClosetId: 'JAN-CLOSET',
   restroomIds: ['REST-001', 'REST-002'],
 };
+
+export const LIFECYCLE_RULES = {
+  // Employee arrival window: 6:00 AM - 9:00 AM
+  employeeArrivalStart: 360,
+  employeeArrivalEnd: 540,
+  // Employee departure window: 4:00 PM - 6:00 PM
+  employeeDepartureStart: 960,
+  employeeDepartureEnd: 1080,
+  // Building entrance (grid coordinates)
+  entryPoint: { x: 25, y: 38 },
+  lobbyId: 'LOBBY',
+  // Guest parameters
+  maxGuests: 20,
+  guestSpawnProbability: 0.00002,   // per tick, scales with speedMultiplier
+  guestStayMin: 30,                  // minutes
+  guestStayMax: 120,
+  // Guest work day (when guests can appear)
+  guestWindowStart: 480,  // 8 AM
+  guestWindowEnd: 1020,   // 5 PM
+};

@@ -120,6 +120,10 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
           baseColor = '#e2e8f0';
           floorPattern = 'plain';
           break;
+        case RoomType.LOBBY:
+          baseColor = '#dbeafe'; // light blue entrance
+          floorPattern = 'tile';
+          break;
       }
 
       // Restroom being cleaned — pulsing red-to-white
@@ -359,10 +363,14 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
 
     // Draw NPCs
     state.npcs.forEach(npc => {
+      // Skip NPCs not in the building
+      if (npc.state === 'AWAY') return;
+
       const { px, py } = project(npc.x, npc.y);
       const h = 24 * npc.size;
       const w = 12 * npc.size;
       const isJanitor = npc.npcType === 'JANITOR';
+      const isGuest = npc.npcType === 'GUEST';
 
       // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
@@ -380,6 +388,15 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
       if (isJanitor) {
         ctx.fillStyle = 'rgba(255,255,255,0.5)';
         ctx.fillRect(px - w / 4, py + TILE_HEIGHT / 2 - h + 4, w / 2, h * 0.5);
+      }
+
+      // Guest: yellow badge on chest
+      if (isGuest) {
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(px - w / 3, py + TILE_HEIGHT / 2 - h + 6, (w * 2) / 3, 5);
+        ctx.strokeStyle = '#713f12';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(px - w / 3, py + TILE_HEIGHT / 2 - h + 6, (w * 2) / 3, 5);
       }
 
       // Head

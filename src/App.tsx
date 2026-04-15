@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SimState, SimEvent, Room, NPCState } from '@/types/sim';
-import { INITIAL_ROOMS, createNPC, createJanitorNPC, createInitialRestroomStatuses, updateSimulation, getDeskIdForNPC, JANITORIAL_RULES, SIM_CONFIG } from '@/simulation/engine';
+import { INITIAL_ROOMS, createNPC, createJanitorNPC, createInitialRestroomStatuses, updateSimulation, getDeskIdForNPC, resetGuestCounter, JANITORIAL_RULES, SIM_CONFIG, LIFECYCLE_RULES } from '@/simulation/engine';
 import { IsometricRenderer } from '@/components/Simulator/Canvas';
 import { Controls } from '@/components/Simulator/Controls';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +22,7 @@ function makeInitialNPCs() {
   return [...employees, createJanitorNPC()];
 }
 
-function resetNPC(npc: any, cleanRooms: Room[], urgencyRange: [number, number]) {
+function resetNPC(npc: any, cleanRooms: Room[], urgencyRange: [number, number], mode: 'DAY_START' | 'AT_DESKS') {
   if (npc.npcType === 'JANITOR') {
     const closet = cleanRooms.find(r => r.id === JANITORIAL_RULES.janitorClosetId);
     return {
@@ -38,6 +38,31 @@ function resetNPC(npc: any, cleanRooms: Room[], urgencyRange: [number, number]) 
       leaveTime: undefined,
     };
   }
+
+  // Employees: at day start, go AWAY with new arrival/departure times.
+  // At "AT_DESKS" (for skipToAllHands), place at desk, already in building.
+  const arrivalTime = LIFECYCLE_RULES.employeeArrivalStart +
+    Math.random() * (LIFECYCLE_RULES.employeeArrivalEnd - LIFECYCLE_RULES.employeeArrivalStart);
+  const departureTime = LIFECYCLE_RULES.employeeDepartureStart +
+    Math.random() * (LIFECYCLE_RULES.employeeDepartureEnd - LIFECYCLE_RULES.employeeDepartureStart);
+
+  if (mode === 'DAY_START') {
+    return {
+      ...npc,
+      x: -100, y: -100,
+      targetX: 0, targetY: 0,
+      state: NPCState.AWAY,
+      path: [],
+      restroomUrgency: urgencyRange[0] + Math.random() * (urgencyRange[1] - urgencyRange[0]),
+      currentRoomId: undefined,
+      targetRoomId: undefined,
+      leaveTime: undefined,
+      arrivalTime,
+      departureTime,
+      isExiting: false,
+    };
+  }
+
   const deskId = getDeskIdForNPC(npc.id);
   const desk = cleanRooms.find(r => r.id === deskId);
   return {
@@ -52,6 +77,10 @@ function resetNPC(npc: any, cleanRooms: Room[], urgencyRange: [number, number]) 
     currentRoomId: deskId,
     targetRoomId: undefined,
     leaveTime: undefined,
+    // Keep existing arrivalTime (already arrived) but ensure departureTime is in future
+    arrivalTime: npc.arrivalTime ?? LIFECYCLE_RULES.employeeArrivalStart,
+    departureTime,
+    isExiting: false,
   };
 }
 
@@ -160,9 +189,12 @@ export default function App() {
             workOrders: [],
             restroomStatuses: createInitialRestroomStatuses(),
             predictions: [],
-            npcs: prev.npcs.map(npc => resetNPC(npc, cleanRooms, [0, 0.3])),
+            npcs: prev.npcs
+              .filter(n => n.npcType !== 'GUEST') // clear guests
+              .map(npc => resetNPC(npc, cleanRooms, [0, 0.3], 'DAY_START')),
           };
         });
+        resetGuestCounter();
       }, 2000);
       return () => clearTimeout(timer);
     }
@@ -200,7 +232,10 @@ export default function App() {
           workOrders: [],
           restroomStatuses: createInitialRestroomStatuses(),
           predictions: [],
-          npcs: prev.npcs.map(npc => resetNPC(npc, cleanRooms, [0, 0.3])),
+          // Resetting to next day at 6 AM — employees AWAY, arrive during fast-forward
+          npcs: prev.npcs
+            .filter(n => n.npcType !== 'GUEST')
+            .map(npc => resetNPC(npc, cleanRooms, [0, 0.3], 'DAY_START')),
         };
       }
     });
