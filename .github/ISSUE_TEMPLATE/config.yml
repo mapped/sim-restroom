@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/mapped/sim-restroom/security/advisories/new
+    about: Please report security issues privately, not via public issues. See SECURITY.md.
+  - name: Mapped platform questions
+    url: https://mapped.com
+    about: Questions about Mapped's production platform (not this simulator) are best routed through mapped.com.
