@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Zap, FastForward, List, ShieldCheck } from 'lucide-react';
+import { WorkOrder } from '@/types/sim';
+import { WorkOrderTicket } from '@/components/Simulator/WorkOrderTicket';
 
 interface ControlsProps {
   speed: number;
@@ -11,6 +13,8 @@ interface ControlsProps {
   onSkipToAllHands: () => void;
   onTogglePredictive: (enabled: boolean) => void;
   events: any[];
+  workOrders: WorkOrder[];
+  simTime: number;
 }
 
 const SPEED_OPTIONS = [
@@ -40,8 +44,16 @@ const EVENT_FILTERS: { key: string; label: string }[] = [
 
 export const Controls: React.FC<ControlsProps> = ({
   speed, predictiveMode,
-  onSetSpeed, onSkipToAllHands, onTogglePredictive, events
+  onSetSpeed, onSkipToAllHands, onTogglePredictive, events,
+  workOrders, simTime,
 }) => {
+  // Hover state for WORK_ORDER_CREATED rows — reveals the CMMS ticket popup
+  const [hoveredWO, setHoveredWO] = useState<{ wo: WorkOrder; x: number; y: number } | null>(null);
+  const woById = useMemo(() => {
+    const map = new Map<string, WorkOrder>();
+    for (const wo of workOrders) map.set(wo.id, wo);
+    return map;
+  }, [workOrders]);
   const formatTime = (mins: number) => {
     const h = Math.floor(mins / 60);
     const m = Math.floor(mins % 60);
@@ -213,37 +225,66 @@ export const Controls: React.FC<ControlsProps> = ({
             className="h-[250px] overflow-y-auto font-mono text-[10px] p-4 space-y-2"
           >
             {visible.length === 0 && <div className="text-slate-500 italic">Waiting for events...</div>}
-            {visible.map((e, i) => (
-              <div key={`${e.timestamp}-${i}-${e.type}`} className="flex items-center gap-2 border-b border-slate-800/50 pb-1">
-                <span className="text-slate-500">[{formatTime(e.timestamp)}]</span>
-                <Badge variant="outline" className={`text-[8px] py-0 h-4 ${EVENT_BADGE_STYLES[e.type] || 'border-slate-500 text-slate-400'}`}>
-                  {e.type.replace(/_/g, ' ')}
-                </Badge>
-                {e.type === 'OCCUPANCY_COUNT' ? (
-                  <span className="text-slate-300 ml-auto">
-                    EMP:{e.employeeCount} · GST:{e.guestCount}
-                  </span>
-                ) : e.type === 'WORK_ORDER_CREATED' ? (
-                  <>
-                    <span className="text-yellow-300 font-bold">
-                      WO-{String(e.workOrderDailyNumber ?? 0).padStart(3, '0')}
+            {visible.map((e, i) => {
+              const isWO = e.type === 'WORK_ORDER_CREATED';
+              const wo = isWO && e.workOrderId ? woById.get(e.workOrderId) : null;
+              return (
+                <div
+                  key={`${e.timestamp}-${i}-${e.type}`}
+                  className={[
+                    'flex items-center gap-2 border-b border-slate-800/50 pb-1',
+                    isWO && wo ? 'cursor-pointer hover:bg-slate-800/60 rounded px-1 -mx-1' : '',
+                  ].join(' ')}
+                  onMouseEnter={isWO && wo ? (ev) => {
+                    const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+                    setHoveredWO({ wo, x: rect.left, y: rect.top });
+                  } : undefined}
+                  onMouseLeave={isWO && wo ? () => setHoveredWO(null) : undefined}
+                >
+                  <span className="text-slate-500">[{formatTime(e.timestamp)}]</span>
+                  <Badge variant="outline" className={`text-[8px] py-0 h-4 ${EVENT_BADGE_STYLES[e.type] || 'border-slate-500 text-slate-400'}`}>
+                    {e.type.replace(/_/g, ' ')}
+                  </Badge>
+                  {e.type === 'OCCUPANCY_COUNT' ? (
+                    <span className="text-slate-300 ml-auto">
+                      EMP:{e.employeeCount} · GST:{e.guestCount}
                     </span>
-                    <span className="text-blue-400">{e.restroomId}</span>
-                    <span className="text-slate-400 truncate ml-auto" title={e.reasonDetail}>
-                      {e.reasonDetail}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-slate-300 truncate max-w-[60px]">{e.npcId}</span>
-                    <span className="text-blue-400 ml-auto">{e.restroomId}</span>
-                  </>
-                )}
-              </div>
-            ))}
+                  ) : isWO ? (
+                    <>
+                      <span className="text-yellow-300 font-bold">
+                        WO-{String(e.workOrderDailyNumber ?? 0).padStart(3, '0')}
+                      </span>
+                      <span className="text-blue-400">{e.restroomId}</span>
+                      <span className="text-slate-400 truncate ml-auto" title={e.reasonDetail}>
+                        {e.reasonDetail}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-slate-300 truncate max-w-[60px]">{e.npcId}</span>
+                      <span className="text-blue-400 ml-auto">{e.restroomId}</span>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </CardContent>
       </Card>
+
+      {/* Hovering a WORK_ORDER_CREATED row reveals the same CMMS ticket card
+          that floats above the janitor closet. Positioned in viewport space. */}
+      {hoveredWO && (
+        <div
+          className="fixed z-50 pointer-events-none"
+          style={{
+            left: Math.min(hoveredWO.x + 20, window.innerWidth - 260),
+            top: Math.max(8, hoveredWO.y - 100),
+          }}
+        >
+          <WorkOrderTicket wo={hoveredWO.wo} now={simTime} />
+        </div>
+      )}
     </div>
   );
 };

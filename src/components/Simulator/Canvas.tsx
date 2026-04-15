@@ -7,6 +7,16 @@ interface RendererProps {
   state: SimState;
 }
 
+// Short formatter for "1h 23m" / "23m" / "45s"
+function formatCountdown(mins: number): string {
+  if (mins <= 0) return '0m';
+  if (mins < 1) return `${Math.max(1, Math.round(mins * 60))}s`;
+  const h = Math.floor(mins / 60);
+  const m = Math.floor(mins % 60);
+  if (h <= 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
 const TILE_WIDTH = 48;
 const TILE_HEIGHT = 24;
 const WALL_HEIGHT = 32;
@@ -350,6 +360,36 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
         ctx.fillStyle = '#1e293b';
         ctx.fillText(room.label.toUpperCase(), 0, 0);
 
+        // Meeting room countdown (black → next meeting; green → current ends in)
+        if (room.type === RoomType.MEETING_ROOM) {
+          const roomMeetings = state.meetings.filter(m => m.roomId === room.id);
+          const active = roomMeetings.find(m => state.time >= m.startTime && state.time < m.endTime);
+          const next = !active
+            ? roomMeetings
+                .filter(m => m.startTime > state.time)
+                .sort((a, b) => a.startTime - b.startTime)[0]
+            : null;
+
+          let cdText: string | null = null;
+          let cdColor = '#0f172a';
+          if (active) {
+            cdText = `Ends in ${formatCountdown(active.endTime - state.time)}`;
+            cdColor = '#15803d'; // green-700
+          } else if (next) {
+            cdText = `Next in ${formatCountdown(next.startTime - state.time)}`;
+            cdColor = '#0f172a'; // slate-900 (black-ish)
+          }
+
+          if (cdText) {
+            ctx.font = 'bold 10px "Inter", sans-serif';
+            const cdWidth = ctx.measureText(cdText).width;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.fillRect(-cdWidth / 2 - 3, 8, cdWidth + 6, 14);
+            ctx.fillStyle = cdColor;
+            ctx.fillText(cdText, 0, 15);
+          }
+        }
+
         // Prediction ETA for restrooms
         const prediction = state.predictions?.find(p => p.roomId === room.id);
         if (prediction?.predictedThresholdTime && !restroomStatus?.isBeingCleaned) {
@@ -642,7 +682,7 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
   const hoveredRoom = hover ? state.rooms.find(r => r.id === hover.roomId) : null;
   const hoveredMeetings = hover
     ? state.meetings
-        .filter(m => m.roomId === hover.roomId)
+        .filter(m => m.roomId === hover.roomId && m.endTime > state.time)
         .sort((a, b) => a.startTime - b.startTime)
     : [];
 
@@ -686,6 +726,9 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
         </div>
       )}
 
+      {/* Legend — types of people */}
+      <PeopleLegend />
+
       {state.isResetting && (
         <div className="absolute inset-0 bg-white flex items-center justify-center animate-in fade-in duration-1000">
           <div className="text-slate-900 font-mono text-2xl animate-pulse">
@@ -693,6 +736,91 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
           </div>
         </div>
       )}
+
+      {/* End-of-day: janitor is waving — wait for user to continue to next day */}
+      {!state.isResetting && state.endOfDayPhase === 'JANITOR_WAVING' && (
+        <div className="absolute inset-x-0 bottom-[12%] flex items-center justify-center pointer-events-none">
+          <div className="bg-white/95 border-2 border-slate-800 shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] px-6 py-3 font-mono text-slate-900 text-lg animate-pulse">
+            Press any key to continue...
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// Legend — people types, bottom-left corner of the canvas
+// ============================================================================
+
+/**
+ * Little person SVG matching the NPC sprite rendered on the canvas: rounded
+ * rectangle body (in `color`), circular head (in `skin`), plus optional type
+ * adornments — a janitor's green cap, a guest's yellow chest badge, a meeting
+ * guest's lanyard and diamond badge. Kept tight (24×28) for an inline legend.
+ */
+const MiniPerson: React.FC<{ variant: 'EMPLOYEE' | 'JANITOR' | 'GUEST' | 'MEETING_GUEST' }> = ({ variant }) => {
+  // Colors chosen to match the on-canvas sprites in draw() above.
+  const palette = {
+    EMPLOYEE: { body: '#3357FF', skin: '#F1C27D' },
+    JANITOR: { body: '#22c55e', skin: '#F1C27D' },
+    GUEST: { body: '#64748b', skin: '#F1C27D' },
+    MEETING_GUEST: { body: '#f97316', skin: '#F1C27D' },
+  }[variant];
+
+  return (
+    <svg width="20" height="26" viewBox="0 0 20 26" className="shrink-0">
+      {/* shadow */}
+      <ellipse cx="10" cy="25" rx="6" ry="1.5" fill="rgba(0,0,0,0.2)" />
+      {/* body */}
+      <rect x="4" y="12" width="12" height="11" rx="3" fill={palette.body} stroke="#1e293b" strokeWidth="0.5" />
+      {/* janitor apron stripe */}
+      {variant === 'JANITOR' && (
+        <rect x="7" y="13" width="6" height="8" fill="rgba(255,255,255,0.55)" />
+      )}
+      {/* guest chest badge */}
+      {variant === 'GUEST' && (
+        <rect x="6" y="14" width="8" height="3" fill="#facc15" stroke="#713f12" strokeWidth="0.5" />
+      )}
+      {/* head */}
+      <circle cx="10" cy="8" r="4" fill={palette.skin} stroke="#1e293b" strokeWidth="0.5" />
+      {/* janitor hat */}
+      {variant === 'JANITOR' && (
+        <rect x="5" y="3.5" width="10" height="2" fill="#22c55e" stroke="#166534" strokeWidth="0.4" />
+      )}
+      {/* eyes */}
+      <circle cx="8.5" cy="8" r="0.7" fill="#000" />
+      <circle cx="11.5" cy="8" r="0.7" fill="#000" />
+      {/* meeting guest lanyard + diamond */}
+      {variant === 'MEETING_GUEST' && (
+        <>
+          <line x1="10" y1="12" x2="10" y2="16" stroke="#374151" strokeWidth="0.8" />
+          <polygon points="10,15 12,17 10,19 8,17" fill={palette.body} stroke="#1f2937" strokeWidth="0.5" />
+        </>
+      )}
+    </svg>
+  );
+};
+
+const PeopleLegend: React.FC = () => {
+  const items: { label: string; variant: 'EMPLOYEE' | 'JANITOR' | 'GUEST' | 'MEETING_GUEST' }[] = [
+    { label: 'Employee', variant: 'EMPLOYEE' },
+    { label: 'Janitor', variant: 'JANITOR' },
+    { label: 'Guest', variant: 'GUEST' },
+    { label: 'Meeting Guest', variant: 'MEETING_GUEST' },
+  ];
+
+  return (
+    <div className="absolute bottom-[8%] left-3 bg-white/90 backdrop-blur-sm border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] px-3 py-1.5 font-mono z-10">
+      <div className="flex items-center gap-4">
+        <div className="text-[9px] text-slate-500 uppercase tracking-wider">Legend</div>
+        {items.map(it => (
+          <div key={it.label} className="flex items-center gap-1.5 text-[10px] text-slate-800">
+            <MiniPerson variant={it.variant} />
+            <span className="font-bold whitespace-nowrap">{it.label}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -742,7 +870,6 @@ const MeetingTooltip: React.FC<MeetingTooltipProps> = ({
           <div className="text-[10px] text-slate-500 italic px-1 py-1">No meetings scheduled</div>
         )}
         {meetings.map(m => {
-          const isPast = currentTime >= m.endTime;
           const isActive = currentTime >= m.startTime && currentTime < m.endTime;
           const attendees = m.attendeeIds.length;
           const guests = m.guestIds?.length ?? 0;
@@ -751,27 +878,34 @@ const MeetingTooltip: React.FC<MeetingTooltipProps> = ({
               key={m.id}
               className={[
                 'flex items-center justify-between gap-2 px-1 py-1 text-[10px] border-b last:border-b-0 border-slate-200',
-                isPast ? 'opacity-40 line-through' : '',
-                isActive ? 'bg-blue-50' : '',
+                isActive ? 'bg-green-50 border-l-2 border-l-green-600' : '',
               ].join(' ')}
             >
               <div className="flex flex-col">
-                <span className={`font-bold ${isActive ? 'text-blue-700' : 'text-slate-800'}`}>
+                <span className={`font-bold ${isActive ? 'text-green-700' : 'text-slate-800'}`}>
                   {formatRange(m.startTime, m.endTime)}
                 </span>
                 <span className="text-[9px] text-slate-500">{m.id}</span>
               </div>
               <div className="flex items-center gap-1 text-[9px]">
-                <span title="attendees" className="bg-slate-200 text-slate-700 px-1 border border-slate-400">
+                <span
+                  title="employees"
+                  className="bg-slate-200 text-slate-700 px-1 border border-slate-400 flex items-center gap-0.5"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500 inline-block" />
                   {attendees}
                 </span>
                 {guests > 0 && (
-                  <span title="guests" className="bg-orange-100 text-orange-700 px-1 border border-orange-400">
+                  <span
+                    title="external guests"
+                    className="bg-orange-100 text-orange-700 px-1 border border-orange-400 flex items-center gap-0.5"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 inline-block" />
                     +{guests}
                   </span>
                 )}
                 {isActive && (
-                  <span className="bg-blue-300 text-blue-900 px-1 border border-blue-600 font-bold animate-pulse">
+                  <span className="bg-green-300 text-green-900 px-1 border border-green-600 font-bold animate-pulse">
                     NOW
                   </span>
                 )}

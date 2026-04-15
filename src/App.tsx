@@ -117,6 +117,7 @@ export default function App() {
   const pendingEventsRef = useRef<SimEvent[]>([]);
   const eventHistoryRef = useRef<SimEvent[]>([]);
   const fastForwardRef = useRef<{ target: number } | null>(null);
+  const awaitingContinueRef = useRef<boolean>(false);
 
   const formatTime = (mins: number) => {
     const h = Math.floor(mins / 60);
@@ -246,6 +247,16 @@ export default function App() {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
+      // End-of-day: janitor is waving — any key advances to the next day.
+      // This overrides the other shortcuts so Space/A/S don't dual-trigger.
+      // We only act when the state is actually "waiting for continue".
+      // (checked via a ref-less read of the latest state below)
+      if (awaitingContinueRef.current) {
+        e.preventDefault();
+        setState(prev => prev.isResetting ? prev : { ...prev, isResetting: true });
+        return;
+      }
+
       if (e.code === 'Space') {
         e.preventDefault();
         togglePause();
@@ -298,6 +309,10 @@ export default function App() {
   }, []);
 
   skipToAllHandsRef.current = skipToAllHands;
+
+  // Keep the "awaiting continue" ref in sync with current state so the global
+  // keydown handler doesn't need to re-bind on every state change.
+  awaitingContinueRef.current = !state.isResetting && state.endOfDayPhase === 'JANITOR_WAVING';
 
   return (
     <div className="min-h-screen bg-white font-sans">
@@ -377,6 +392,8 @@ export default function App() {
               onSkipToAllHands={skipToAllHands}
               onTogglePredictive={handleTogglePredictive}
               events={events}
+              workOrders={state.workOrders}
+              simTime={state.time}
             />
           </div>
         </main>

@@ -100,7 +100,7 @@ export const INITIAL_ROOMS: Room[] = [
   { id: 'MEET-001', type: RoomType.MEETING_ROOM, x: 2, y: 24, width: 6, height: 4, label: 'Meeting A', capacity: 6, occupancy: [], door: { x: 8, y: 26 } },
   { id: 'MEET-002', type: RoomType.MEETING_ROOM, x: 2, y: 30, width: 6, height: 4, label: 'Meeting B', capacity: 6, occupancy: [], door: { x: 8, y: 32 } },
   { id: 'JAN-CLOSET', type: RoomType.JANITOR_CLOSET, x: 2, y: 36, width: 2, height: 2, label: 'Janitor', capacity: 1, occupancy: [], door: { x: 4, y: 37 } },
-  { id: 'LOBBY', type: RoomType.LOBBY, x: 22, y: 38, width: 5, height: 2, label: 'Entrance', capacity: 0, occupancy: [], door: { x: 24, y: 38 } },
+  { id: 'LOBBY', type: RoomType.LOBBY, x: 6, y: 38, width: 5, height: 2, label: 'Entrance', capacity: 0, occupancy: [], door: { x: 8, y: 38 } },
 ];
 
 // ============================================================================
@@ -1123,7 +1123,8 @@ export function updateSimulation(
         const waveSpot = { x: Math.round(lobby.x + lobby.width / 2), y: Math.max(0, lobby.y - 2) };
         const atSpot = Math.abs(janitor.x - waveSpot.x) < 0.5 && Math.abs(janitor.y - waveSpot.y) < 0.5 && janitor.path.length === 0;
         if (atSpot && janitor.state !== NPCState.WAVING) {
-          // Start waving
+          // Start waving — and keep waving indefinitely until the user presses
+          // a key to advance to the next day (see App.tsx key handler).
           const updatedJanitor: NPC = {
             ...janitor,
             state: NPCState.WAVING,
@@ -1133,22 +1134,9 @@ export function updateSimulation(
             y: waveSpot.y,
           };
           updatedNPCs = updatedNPCs.map(n => n.id === janitor.id ? updatedJanitor : n);
-          waveEndTime = newTime + 3; // 3 sim minutes of waving
+          waveEndTime = Infinity;
         }
       }
-    } else if (janitor && waveEndTime != null && newTime >= waveEndTime && janitor.state === NPCState.WAVING) {
-      // Wave done — walk out the exit
-      const updatedJanitor: NPC = {
-        ...janitor,
-        state: NPCState.WALKING,
-        isExiting: true,
-        targetRoomId: undefined,
-        targetX: LIFECYCLE_RULES.entryPoint.x,
-        targetY: LIFECYCLE_RULES.entryPoint.y,
-        path: findPath({ x: janitor.x, y: janitor.y }, LIFECYCLE_RULES.entryPoint),
-      };
-      updatedNPCs = updatedNPCs.map(n => n.id === janitor.id ? updatedJanitor : n);
-      endOfDayPhase = 'JANITOR_LEAVING';
     }
   }
 

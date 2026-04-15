@@ -47,7 +47,7 @@ export const LIFECYCLE_RULES = {
   employeeDepartureStart: 960,
   employeeDepartureEnd: 1080,
   // Building entrance (grid coordinates)
-  entryPoint: { x: 24, y: 38 },
+  entryPoint: { x: 8, y: 38 },
   lobbyId: 'LOBBY',
   // Guest parameters
   maxGuests: 20,
