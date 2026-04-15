@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: MIT
 // See LICENSE at the repository root for full license text.
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Zap, FastForward, List, ShieldCheck } from 'lucide-react';
-import { WorkOrder } from '@/types/sim';
-import { WorkOrderTicket } from '@/components/Simulator/WorkOrderTicket';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Zap, FastForward, List, ShieldCheck } from "lucide-react";
+import { WorkOrder } from "@/types/sim";
+import { WorkOrderTicket } from "@/components/Simulator/WorkOrderTicket";
 
 interface ControlsProps {
   speed: number;
@@ -22,34 +22,39 @@ interface ControlsProps {
 }
 
 const SPEED_OPTIONS = [
-  { label: 'Real Time', value: 1 },
-  { label: 'Fast (1m/s)', value: 60 },
-  { label: 'Lightning (5m/s)', value: 300 }
+  { label: "Real Time", value: 1 },
+  { label: "Fast (1m/s)", value: 60 },
+  { label: "Lightning (5m/s)", value: 300 },
 ];
 
 const EVENT_BADGE_STYLES: Record<string, string> = {
-  ENTER: 'border-green-500 text-green-400',
-  EXIT: 'border-red-500 text-red-400',
-  WORK_ORDER_CREATED: 'border-yellow-500 text-yellow-400',
-  CLEANING_STARTED: 'border-orange-500 text-orange-400',
-  CLEANING_COMPLETED: 'border-emerald-500 text-emerald-400',
-  OCCUPANCY_COUNT: 'border-blue-500 text-blue-400',
+  ENTER: "border-green-500 text-green-400",
+  EXIT: "border-red-500 text-red-400",
+  WORK_ORDER_CREATED: "border-yellow-500 text-yellow-400",
+  CLEANING_STARTED: "border-orange-500 text-orange-400",
+  CLEANING_COMPLETED: "border-emerald-500 text-emerald-400",
+  OCCUPANCY_COUNT: "border-blue-500 text-blue-400",
 };
 
 const EVENT_FILTERS: { key: string; label: string }[] = [
-  { key: 'ALL', label: 'All' },
-  { key: 'ENTER', label: 'Enter' },
-  { key: 'EXIT', label: 'Exit' },
-  { key: 'WORK_ORDER_CREATED', label: 'Work Order' },
-  { key: 'CLEANING_STARTED', label: 'Cleaning' },
-  { key: 'CLEANING_COMPLETED', label: 'Done' },
-  { key: 'OCCUPANCY_COUNT', label: 'Occupancy' },
+  { key: "ALL", label: "All" },
+  { key: "ENTER", label: "Enter" },
+  { key: "EXIT", label: "Exit" },
+  { key: "WORK_ORDER_CREATED", label: "Work Order" },
+  { key: "CLEANING_STARTED", label: "Cleaning" },
+  { key: "CLEANING_COMPLETED", label: "Done" },
+  { key: "OCCUPANCY_COUNT", label: "Occupancy" },
 ];
 
 export const Controls: React.FC<ControlsProps> = ({
-  speed, predictiveMode,
-  onSetSpeed, onSkipToAllHands, onTogglePredictive, events,
-  workOrders, simTime,
+  speed,
+  predictiveMode,
+  onSetSpeed,
+  onSkipToAllHands,
+  onTogglePredictive,
+  events,
+  workOrders,
+  simTime,
 }) => {
   // Hover state for WORK_ORDER_CREATED rows — reveals the CMMS ticket popup
   const [hoveredWO, setHoveredWO] = useState<{ wo: WorkOrder; x: number; y: number } | null>(null);
@@ -61,22 +66,19 @@ export const Controls: React.FC<ControlsProps> = ({
   const formatTime = (mins: number) => {
     const h = Math.floor(mins / 60);
     const m = Math.floor(mins % 60);
-    const ampm = h >= 12 ? 'PM' : 'AM';
+    const ampm = h >= 12 ? "PM" : "AM";
     const displayH = h % 12 || 12;
-    return `${displayH}:${m.toString().padStart(2, '0')} ${ampm}`;
+    return `${displayH}:${m.toString().padStart(2, "0")} ${ampm}`;
   };
 
-  const [filter, setFilter] = useState<string>('ALL');
+  const [filter, setFilter] = useState<string>("ALL");
   const filteredEvents = useMemo(
-    () => filter === 'ALL' ? events : events.filter(e => e.type === filter),
+    () => (filter === "ALL" ? events : events.filter((e) => e.type === filter)),
     [events, filter]
   );
 
   // Newest-first, cap history at 200 for scroll performance
-  const visible = useMemo(
-    () => filteredEvents.slice(-200).reverse(),
-    [filteredEvents]
-  );
+  const visible = useMemo(() => filteredEvents.slice(-200).reverse(), [filteredEvents]);
 
   // Scroll lock: when user scrolls away from the top (newest), suppress the
   // automatic snap-back so they can keep reading older events. When they scroll
@@ -85,7 +87,9 @@ export const Controls: React.FC<ControlsProps> = ({
   const prevScrollHeightRef = useRef(0);
   const [followMode, setFollowMode] = useState(true);
   const followModeRef = useRef(followMode);
-  useEffect(() => { followModeRef.current = followMode; }, [followMode]);
+  useEffect(() => {
+    followModeRef.current = followMode;
+  }, [followMode]);
 
   useLayoutEffect(() => {
     const el = logRef.current;
@@ -125,15 +129,18 @@ export const Controls: React.FC<ControlsProps> = ({
                 <Zap className="w-3 h-3" /> SIM SPEED
               </span>
               <span className="font-mono text-xs font-bold text-blue-600">
-                {SPEED_OPTIONS.find(o => o.value === speed)?.label || `${speed}x`}
+                {SPEED_OPTIONS.find((o) => o.value === speed)?.label || `${speed}x`}
               </span>
             </div>
             <div className="flex gap-2">
               {SPEED_OPTIONS.map((opt) => (
-                <Button key={opt.value}
-                  variant={speed === opt.value ? 'default' : 'outline'}
-                  size="sm" className="flex-1 font-mono text-[10px]"
-                  onClick={() => onSetSpeed(opt.value)}>
+                <Button
+                  key={opt.value}
+                  variant={speed === opt.value ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1 font-mono text-[10px]"
+                  onClick={() => onSetSpeed(opt.value)}
+                >
                   {opt.label}
                 </Button>
               ))}
@@ -149,15 +156,19 @@ export const Controls: React.FC<ControlsProps> = ({
             </div>
             <div className="flex gap-2">
               <Button
-                variant={predictiveMode ? 'default' : 'outline'}
-                size="sm" className="flex-1 font-mono text-[10px]"
-                onClick={() => onTogglePredictive(true)}>
+                variant={predictiveMode ? "default" : "outline"}
+                size="sm"
+                className="flex-1 font-mono text-[10px]"
+                onClick={() => onTogglePredictive(true)}
+              >
                 PREDICTIVE
               </Button>
               <Button
-                variant={!predictiveMode ? 'default' : 'outline'}
-                size="sm" className="flex-1 font-mono text-[10px]"
-                onClick={() => onTogglePredictive(false)}>
+                variant={!predictiveMode ? "default" : "outline"}
+                size="sm"
+                className="flex-1 font-mono text-[10px]"
+                onClick={() => onTogglePredictive(false)}
+              >
                 SCHEDULED (5 PM)
               </Button>
             </div>
@@ -165,20 +176,39 @@ export const Controls: React.FC<ControlsProps> = ({
 
           {/* Skip to all-hands */}
           <div className="px-2 pt-2">
-            <Button variant="outline"
+            <Button
+              variant="outline"
               className="w-full border-2 border-slate-800 font-mono shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
-              onClick={onSkipToAllHands}>
+              onClick={onSkipToAllHands}
+            >
               <FastForward className="w-4 h-4 mr-2" /> SKIP TO ALL-HANDS
             </Button>
           </div>
 
           {/* Keyboard shortcut hints */}
           <div className="px-2 pt-1">
-            <div className="text-[9px] font-mono text-slate-500 uppercase tracking-wider mb-1">Shortcuts</div>
+            <div className="text-[9px] font-mono text-slate-500 uppercase tracking-wider mb-1">
+              Shortcuts
+            </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-slate-600">
-              <span><kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">Space</kbd> pause / resume</span>
-              <span><kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">A</kbd> jump to meeting</span>
-              <span><kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">S</kbd> cycle speed</span>
+              <span>
+                <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">
+                  Space
+                </kbd>{" "}
+                pause / resume
+              </span>
+              <span>
+                <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">
+                  A
+                </kbd>{" "}
+                jump to meeting
+              </span>
+              <span>
+                <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-[9px]">
+                  S
+                </kbd>{" "}
+                cycle speed
+              </span>
             </div>
           </div>
         </CardContent>
@@ -207,14 +237,14 @@ export const Controls: React.FC<ControlsProps> = ({
           </CardTitle>
           {/* Filter chips */}
           <div className="flex flex-wrap gap-1 pt-2">
-            {EVENT_FILTERS.map(f => (
+            {EVENT_FILTERS.map((f) => (
               <button
                 key={f.key}
                 onClick={() => setFilter(f.key)}
                 className={`text-[9px] font-mono px-2 py-0.5 rounded border transition-colors ${
                   filter === f.key
-                    ? 'bg-blue-500 border-blue-400 text-white'
-                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                    ? "bg-blue-500 border-blue-400 text-white"
+                    : "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700"
                 }`}
               >
                 {f.label}
@@ -228,35 +258,44 @@ export const Controls: React.FC<ControlsProps> = ({
             onScroll={handleScroll}
             className="h-[250px] overflow-y-auto font-mono text-[10px] p-4 space-y-2"
           >
-            {visible.length === 0 && <div className="text-slate-500 italic">Waiting for events...</div>}
+            {visible.length === 0 && (
+              <div className="text-slate-500 italic">Waiting for events...</div>
+            )}
             {visible.map((e, i) => {
-              const isWO = e.type === 'WORK_ORDER_CREATED';
+              const isWO = e.type === "WORK_ORDER_CREATED";
               const wo = isWO && e.workOrderId ? woById.get(e.workOrderId) : null;
               return (
                 <div
                   key={`${e.timestamp}-${i}-${e.type}`}
                   className={[
-                    'flex items-center gap-2 border-b border-slate-800/50 pb-1',
-                    isWO && wo ? 'cursor-pointer hover:bg-slate-800/60 rounded px-1 -mx-1' : '',
-                  ].join(' ')}
-                  onMouseEnter={isWO && wo ? (ev) => {
-                    const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-                    setHoveredWO({ wo, x: rect.left, y: rect.top });
-                  } : undefined}
+                    "flex items-center gap-2 border-b border-slate-800/50 pb-1",
+                    isWO && wo ? "cursor-pointer hover:bg-slate-800/60 rounded px-1 -mx-1" : "",
+                  ].join(" ")}
+                  onMouseEnter={
+                    isWO && wo
+                      ? (ev) => {
+                          const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+                          setHoveredWO({ wo, x: rect.left, y: rect.top });
+                        }
+                      : undefined
+                  }
                   onMouseLeave={isWO && wo ? () => setHoveredWO(null) : undefined}
                 >
                   <span className="text-slate-500">[{formatTime(e.timestamp)}]</span>
-                  <Badge variant="outline" className={`text-[8px] py-0 h-4 ${EVENT_BADGE_STYLES[e.type] || 'border-slate-500 text-slate-400'}`}>
-                    {e.type.replace(/_/g, ' ')}
+                  <Badge
+                    variant="outline"
+                    className={`text-[8px] py-0 h-4 ${EVENT_BADGE_STYLES[e.type] || "border-slate-500 text-slate-400"}`}
+                  >
+                    {e.type.replace(/_/g, " ")}
                   </Badge>
-                  {e.type === 'OCCUPANCY_COUNT' ? (
+                  {e.type === "OCCUPANCY_COUNT" ? (
                     <span className="text-slate-300 ml-auto">
                       EMP:{e.employeeCount} · GST:{e.guestCount}
                     </span>
                   ) : isWO ? (
                     <>
                       <span className="text-yellow-300 font-bold">
-                        WO-{String(e.workOrderDailyNumber ?? 0).padStart(3, '0')}
+                        WO-{String(e.workOrderDailyNumber ?? 0).padStart(3, "0")}
                       </span>
                       <span className="text-blue-400">{e.restroomId}</span>
                       <span className="text-slate-400 truncate ml-auto" title={e.reasonDetail}>

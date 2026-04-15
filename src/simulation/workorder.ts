@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // See LICENSE at the repository root for full license text.
 
-import { WorkOrder, WorkOrderReason, WorkOrderPriority, SimEvent } from '@/types/sim';
+import { WorkOrder, WorkOrderReason, WorkOrderPriority, SimEvent } from "@/types/sim";
 
 // ============================================================================
 // WORK ORDER FACTORY
@@ -16,8 +16,8 @@ import { WorkOrder, WorkOrderReason, WorkOrderPriority, SimEvent } from '@/types
 // Short labels for restroom IDs. Kept here (not imported from engine) to avoid
 // a circular import between engine.ts and prediction.ts.
 const RESTROOM_LABELS: Record<string, string> = {
-  'REST-001': 'Restroom A',
-  'REST-002': 'Restroom B',
+  "REST-001": "Restroom A",
+  "REST-002": "Restroom B",
 };
 
 function roomLabelFor(restroomId: string): string {
@@ -25,9 +25,10 @@ function roomLabelFor(restroomId: string): string {
 }
 
 function fmt(t: number) {
-  const h = Math.floor(t / 60), m = Math.floor(t % 60);
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${ampm}`;
+  const h = Math.floor(t / 60),
+    m = Math.floor(t % 60);
+  const ampm = h >= 12 ? "PM" : "AM";
+  return `${h % 12 || 12}:${m.toString().padStart(2, "0")} ${ampm}`;
 }
 
 interface ReasonCtx {
@@ -39,44 +40,44 @@ interface ReasonCtx {
 function buildCopy(
   restroomId: string,
   reason: WorkOrderReason,
-  ctx: ReasonCtx,
+  ctx: ReasonCtx
 ): { title: string; description: string; reasonDetail: string; priority: WorkOrderPriority } {
   const loc = roomLabelFor(restroomId);
   switch (reason) {
-    case 'THRESHOLD_REACHED':
+    case "THRESHOLD_REACHED":
       return {
-        title: 'Restroom Sanitation',
-        description: `Deep clean & restock ${loc}. Usage meter exceeded threshold (${ctx.usageCount ?? '?'} visits since last service).`,
-        reasonDetail: `Usage threshold reached (${ctx.usageCount ?? '?'} visits)`,
-        priority: 'HIGH',
+        title: "Restroom Sanitation",
+        description: `Deep clean & restock ${loc}. Usage meter exceeded threshold (${ctx.usageCount ?? "?"} visits since last service).`,
+        reasonDetail: `Usage threshold reached (${ctx.usageCount ?? "?"} visits)`,
+        priority: "HIGH",
       };
-    case 'SCHEDULED_DAILY':
+    case "SCHEDULED_DAILY":
       return {
-        title: 'End-of-Day Cleaning',
+        title: "End-of-Day Cleaning",
         description: `Scheduled end-of-day sanitation pass for ${loc}. Standard route on daily CMMS calendar.`,
-        reasonDetail: 'Scheduled end-of-day cleaning (5:00 PM)',
-        priority: 'MEDIUM',
+        reasonDetail: "Scheduled end-of-day cleaning (5:00 PM)",
+        priority: "MEDIUM",
       };
-    case 'PREDICTIVE_SURGE':
+    case "PREDICTIVE_SURGE":
       return {
-        title: 'Pre-Surge Cleaning',
-        description: `Pre-emptive sanitation of ${loc} ahead of forecasted restroom surge${ctx.meetingTime != null ? ` around ${fmt(ctx.meetingTime)}` : ''}. Dispatching now while occupancy is low.`,
-        reasonDetail: `Sensor forecast: surge expected${ctx.meetingTime != null ? ` at ${fmt(ctx.meetingTime)}` : ''}`,
-        priority: 'HIGH',
+        title: "Pre-Surge Cleaning",
+        description: `Pre-emptive sanitation of ${loc} ahead of forecasted restroom surge${ctx.meetingTime != null ? ` around ${fmt(ctx.meetingTime)}` : ""}. Dispatching now while occupancy is low.`,
+        reasonDetail: `Sensor forecast: surge expected${ctx.meetingTime != null ? ` at ${fmt(ctx.meetingTime)}` : ""}`,
+        priority: "HIGH",
       };
-    case 'PREDICTIVE_ETA':
+    case "PREDICTIVE_ETA":
       return {
-        title: 'Preventive Sanitation',
-        description: `Sensor trend forecasts ${loc} will reach the cleaning threshold${ctx.thresholdTime != null ? ` at ${fmt(ctx.thresholdTime)}` : ' soon'}. Dispatching janitor early to avoid a service gap.`,
-        reasonDetail: `Predicted threshold ETA${ctx.thresholdTime != null ? ` ${fmt(ctx.thresholdTime)}` : ''}`,
-        priority: 'MEDIUM',
+        title: "Preventive Sanitation",
+        description: `Sensor trend forecasts ${loc} will reach the cleaning threshold${ctx.thresholdTime != null ? ` at ${fmt(ctx.thresholdTime)}` : " soon"}. Dispatching janitor early to avoid a service gap.`,
+        reasonDetail: `Predicted threshold ETA${ctx.thresholdTime != null ? ` ${fmt(ctx.thresholdTime)}` : ""}`,
+        priority: "MEDIUM",
       };
-    case 'END_OF_DAY':
+    case "END_OF_DAY":
       return {
-        title: 'End-of-Day Closeout',
+        title: "End-of-Day Closeout",
         description: `Final sanitation of ${loc} after the office has emptied. Janitor locks up after both restrooms are serviced.`,
-        reasonDetail: 'Office closed — final sanitation pass',
-        priority: 'MEDIUM',
+        reasonDetail: "Office closed — final sanitation pass",
+        priority: "MEDIUM",
       };
   }
 }
@@ -90,7 +91,7 @@ export function createWorkOrder(
   reason: WorkOrderReason,
   createdAt: number,
   day: number,
-  ctx: ReasonCtx = {},
+  ctx: ReasonCtx = {}
 ): WorkOrder {
   if (day !== dailyCounterDay) {
     dailyCounter = 0;
@@ -104,7 +105,7 @@ export function createWorkOrder(
     dailyNumber,
     restroomId,
     createdAt,
-    status: 'PENDING',
+    status: "PENDING",
     title: copy.title,
     description: copy.description,
     reason,
@@ -120,9 +121,9 @@ export function resetWorkOrderDailyCounter(day: number) {
 
 export function emitWorkOrderCreated(events: SimEvent[], wo: WorkOrder, timestamp: number) {
   events.push({
-    type: 'WORK_ORDER_CREATED',
+    type: "WORK_ORDER_CREATED",
     restroomId: wo.restroomId,
-    npcId: 'JAN-01',
+    npcId: "JAN-01",
     timestamp,
     workOrderId: wo.id,
     workOrderDailyNumber: wo.dailyNumber,
@@ -133,7 +134,7 @@ export function emitWorkOrderCreated(events: SimEvent[], wo: WorkOrder, timestam
 }
 
 export function formatDailyWorkOrderId(dailyNumber: number): string {
-  return `WO-${dailyNumber.toString().padStart(3, '0')}`;
+  return `WO-${dailyNumber.toString().padStart(3, "0")}`;
 }
 
 export function restroomLabel(restroomId: string): string {

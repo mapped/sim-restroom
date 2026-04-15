@@ -2,30 +2,47 @@
 // SPDX-License-Identifier: MIT
 // See LICENSE at the repository root for full license text.
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { SimState, SimEvent, Room, NPCState } from '@/types/sim';
-import { INITIAL_ROOMS, createNPC, createJanitorNPC, createInitialRestroomStatuses, updateSimulation, getDeskIdForNPC, resetGuestCounter, resetMeetingGuestCounter, JANITORIAL_RULES, SIM_CONFIG, LIFECYCLE_RULES } from '@/simulation/engine';
-import { IsometricRenderer } from '@/components/Simulator/Canvas';
-import { Controls } from '@/components/Simulator/Controls';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Play, Pause } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from "react";
+import { SimState, SimEvent, Room, NPCState } from "@/types/sim";
+import {
+  INITIAL_ROOMS,
+  createNPC,
+  createJanitorNPC,
+  createInitialRestroomStatuses,
+  updateSimulation,
+  getDeskIdForNPC,
+  resetGuestCounter,
+  resetMeetingGuestCounter,
+  JANITORIAL_RULES,
+  SIM_CONFIG,
+  LIFECYCLE_RULES,
+} from "@/simulation/engine";
+import { IsometricRenderer } from "@/components/Simulator/Canvas";
+import { Controls } from "@/components/Simulator/Controls";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Play, Pause } from "lucide-react";
 
 const POPULATION = 20;
 const FAST_FORWARD_SPEED = 10000; // hyper speed multiplier during fast-forward
 
 const SPEED_CYCLE = [
-  { label: 'Real Time', value: 1 },
-  { label: 'Fast (1m/s)', value: 60 },
-  { label: 'Lightning (5m/s)', value: 300 },
+  { label: "Real Time", value: 1 },
+  { label: "Fast (1m/s)", value: 60 },
+  { label: "Lightning (5m/s)", value: 300 },
 ];
 
 function speedLabelFor(value: number): string {
-  return SPEED_CYCLE.find(o => o.value === value)?.label ?? `${value}x`;
+  return SPEED_CYCLE.find((o) => o.value === value)?.label ?? `${value}x`;
 }
 
 function makeCleanRooms(): Room[] {
-  return INITIAL_ROOMS.map(r => ({ ...r, occupancy: [], flashColor: null as Room['flashColor'], flashTimer: 0 }));
+  return INITIAL_ROOMS.map((r) => ({
+    ...r,
+    occupancy: [],
+    flashColor: null as Room["flashColor"],
+    flashTimer: 0,
+  }));
 }
 
 function makeInitialNPCs() {
@@ -33,9 +50,14 @@ function makeInitialNPCs() {
   return [...employees, createJanitorNPC()];
 }
 
-function resetNPC(npc: any, cleanRooms: Room[], urgencyRange: [number, number], mode: 'DAY_START' | 'AT_DESKS') {
-  if (npc.npcType === 'JANITOR') {
-    const closet = cleanRooms.find(r => r.id === JANITORIAL_RULES.janitorClosetId);
+function resetNPC(
+  npc: any,
+  cleanRooms: Room[],
+  urgencyRange: [number, number],
+  mode: "DAY_START" | "AT_DESKS"
+) {
+  if (npc.npcType === "JANITOR") {
+    const closet = cleanRooms.find((r) => r.id === JANITORIAL_RULES.janitorClosetId);
     return {
       ...npc,
       x: closet ? closet.door.x : npc.x,
@@ -52,16 +74,20 @@ function resetNPC(npc: any, cleanRooms: Room[], urgencyRange: [number, number], 
 
   // Employees: at day start, go AWAY with new arrival/departure times.
   // At "AT_DESKS" (for skipToAllHands), place at desk, already in building.
-  const arrivalTime = LIFECYCLE_RULES.employeeArrivalStart +
+  const arrivalTime =
+    LIFECYCLE_RULES.employeeArrivalStart +
     Math.random() * (LIFECYCLE_RULES.employeeArrivalEnd - LIFECYCLE_RULES.employeeArrivalStart);
-  const departureTime = LIFECYCLE_RULES.employeeDepartureStart +
+  const departureTime =
+    LIFECYCLE_RULES.employeeDepartureStart +
     Math.random() * (LIFECYCLE_RULES.employeeDepartureEnd - LIFECYCLE_RULES.employeeDepartureStart);
 
-  if (mode === 'DAY_START') {
+  if (mode === "DAY_START") {
     return {
       ...npc,
-      x: -100, y: -100,
-      targetX: 0, targetY: 0,
+      x: -100,
+      y: -100,
+      targetX: 0,
+      targetY: 0,
       state: NPCState.AWAY,
       path: [],
       restroomUrgency: urgencyRange[0] + Math.random() * (urgencyRange[1] - urgencyRange[0]),
@@ -75,7 +101,7 @@ function resetNPC(npc: any, cleanRooms: Room[], urgencyRange: [number, number], 
   }
 
   const deskId = getDeskIdForNPC(npc.id);
-  const desk = cleanRooms.find(r => r.id === deskId);
+  const desk = cleanRooms.find((r) => r.id === deskId);
   return {
     ...npc,
     x: desk ? desk.x + 0.5 : npc.x,
@@ -121,9 +147,9 @@ export default function App() {
   const formatTime = (mins: number) => {
     const h = Math.floor(mins / 60);
     const m = Math.floor(mins % 60);
-    const ampm = h >= 12 ? 'PM' : 'AM';
+    const ampm = h >= 12 ? "PM" : "AM";
     const displayH = h % 12 || 12;
-    return `${displayH}:${m.toString().padStart(2, '0')} ${ampm}`;
+    return `${displayH}:${m.toString().padStart(2, "0")} ${ampm}`;
   };
 
   const isFastForwarding = fastForwardRef.current !== null;
@@ -132,22 +158,22 @@ export default function App() {
     const realDelta = time - lastUpdateRef.current;
     lastUpdateRef.current = time;
 
-    setState(prev => {
+    setState((prev) => {
       if (prev.isResetting) return prev;
 
       // During fast-forward, override speed to hyper speed
       const ff = fastForwardRef.current;
-      const simState = ff
-        ? { ...prev, speedMultiplier: FAST_FORWARD_SPEED }
-        : prev;
+      const simState = ff ? { ...prev, speedMultiplier: FAST_FORWARD_SPEED } : prev;
 
-      const { nextState, events: newEvents } = updateSimulation(simState, realDelta, eventHistoryRef.current);
+      const { nextState, events: newEvents } = updateSimulation(
+        simState,
+        realDelta,
+        eventHistoryRef.current
+      );
       pendingEventsRef.current = newEvents;
 
       // Restore actual speed multiplier (don't persist the hyper speed)
-      const result = ff
-        ? { ...nextState, speedMultiplier: prev.speedMultiplier }
-        : nextState;
+      const result = ff ? { ...nextState, speedMultiplier: prev.speedMultiplier } : nextState;
 
       // Check if fast-forward target reached
       if (ff && result.time >= ff.target) {
@@ -156,7 +182,7 @@ export default function App() {
 
       // Auto-slowdown during cleaning — entirely in state (refs don't survive
       // React's double-invocation of setState updaters).
-      const anyCleaning = result.restroomStatuses.some(s => s.isBeingCleaned);
+      const anyCleaning = result.restroomStatuses.some((s) => s.isBeingCleaned);
 
       if (anyCleaning && !result.preCleaningSpeed && result.speedMultiplier >= 300) {
         return { ...result, preCleaningSpeed: result.speedMultiplier, speedMultiplier: 60 };
@@ -172,7 +198,7 @@ export default function App() {
       const batch = pendingEventsRef.current;
       pendingEventsRef.current = [];
       eventHistoryRef.current = [...eventHistoryRef.current, ...batch];
-      setEvents(e => [...e, ...batch]);
+      setEvents((e) => [...e, ...batch]);
     }
 
     requestRef.current = requestAnimationFrame(animate);
@@ -189,14 +215,14 @@ export default function App() {
   useEffect(() => {
     if (state.isResetting) {
       const timer = setTimeout(() => {
-        setState(prev => {
+        setState((prev) => {
           const cleanRooms = makeCleanRooms();
           return {
             ...prev,
             time: 360,
             day: prev.day + 1,
             isResetting: false,
-            endOfDayPhase: 'IDLE',
+            endOfDayPhase: "IDLE",
             endOfDayPhaseDay: prev.day + 1,
             waveEndTime: undefined,
             rooms: cleanRooms,
@@ -205,8 +231,8 @@ export default function App() {
             restroomStatuses: createInitialRestroomStatuses(),
             predictions: [],
             npcs: prev.npcs
-              .filter(n => n.npcType !== 'GUEST' && n.npcType !== 'MEETING_GUEST') // clear transient NPCs
-              .map(npc => resetNPC(npc, cleanRooms, [0, 0.3], 'DAY_START')),
+              .filter((n) => n.npcType !== "GUEST" && n.npcType !== "MEETING_GUEST") // clear transient NPCs
+              .map((npc) => resetNPC(npc, cleanRooms, [0, 0.3], "DAY_START")),
           };
         });
         resetGuestCounter();
@@ -217,23 +243,23 @@ export default function App() {
   }, [state.isResetting]);
 
   const togglePause = useCallback(() => {
-    setState(prev => ({ ...prev, isPaused: !prev.isPaused }));
+    setState((prev) => ({ ...prev, isPaused: !prev.isPaused }));
   }, []);
 
   const cycleSpeed = useCallback(() => {
-    setState(prev => {
-      const idx = SPEED_CYCLE.findIndex(o => o.value === prev.speedMultiplier);
+    setState((prev) => {
+      const idx = SPEED_CYCLE.findIndex((o) => o.value === prev.speedMultiplier);
       const next = SPEED_CYCLE[(idx + 1) % SPEED_CYCLE.length];
       return { ...prev, speedMultiplier: next.value, preCleaningSpeed: undefined };
     });
   }, []);
 
   const handleSetSpeed = (speed: number) => {
-    setState(prev => ({ ...prev, speedMultiplier: speed, preCleaningSpeed: undefined }));
+    setState((prev) => ({ ...prev, speedMultiplier: speed, preCleaningSpeed: undefined }));
   };
 
   const handleTogglePredictive = (enabled: boolean) => {
-    setState(prev => ({ ...prev, predictiveMode: enabled }));
+    setState((prev) => ({ ...prev, predictiveMode: enabled }));
   };
 
   const skipToAllHandsRef = useRef<(() => void) | null>(null);
@@ -243,7 +269,11 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       // Don't hijack when typing in an input
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      )
+        return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       // End-of-day: janitor is waving — any key advances to the next day.
@@ -252,29 +282,29 @@ export default function App() {
       // (checked via a ref-less read of the latest state below)
       if (awaitingContinueRef.current) {
         e.preventDefault();
-        setState(prev => prev.isResetting ? prev : { ...prev, isResetting: true });
+        setState((prev) => (prev.isResetting ? prev : { ...prev, isResetting: true }));
         return;
       }
 
-      if (e.code === 'Space') {
+      if (e.code === "Space") {
         e.preventDefault();
         togglePause();
-      } else if (e.key === 'a' || e.key === 'A') {
+      } else if (e.key === "a" || e.key === "A") {
         e.preventDefault();
         skipToAllHandsRef.current?.();
-      } else if (e.key === 's' || e.key === 'S') {
+      } else if (e.key === "s" || e.key === "S") {
         e.preventDefault();
         cycleSpeed();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [togglePause, cycleSpeed]);
 
   const skipToAllHands = useCallback(() => {
     const targetTime = SIM_CONFIG.ALL_HANDS_TIME - 5; // 5 min before all-hands
 
-    setState(prev => {
+    setState((prev) => {
       if (prev.time < targetTime) {
         // Future today — just fast-forward
         fastForwardRef.current = { target: targetTime };
@@ -290,7 +320,7 @@ export default function App() {
           day: prev.day + 1,
           time: 360,
           isResetting: false,
-          endOfDayPhase: 'IDLE',
+          endOfDayPhase: "IDLE",
           endOfDayPhaseDay: prev.day + 1,
           waveEndTime: undefined,
           rooms: cleanRooms,
@@ -300,8 +330,8 @@ export default function App() {
           predictions: [],
           // Resetting to next day at 6 AM — employees AWAY, arrive during fast-forward
           npcs: prev.npcs
-            .filter(n => n.npcType !== 'GUEST' && n.npcType !== 'MEETING_GUEST')
-            .map(npc => resetNPC(npc, cleanRooms, [0, 0.3], 'DAY_START')),
+            .filter((n) => n.npcType !== "GUEST" && n.npcType !== "MEETING_GUEST")
+            .map((npc) => resetNPC(npc, cleanRooms, [0, 0.3], "DAY_START")),
         };
       }
     });
@@ -311,7 +341,7 @@ export default function App() {
 
   // Keep the "awaiting continue" ref in sync with current state so the global
   // keydown handler doesn't need to re-bind on every state change.
-  awaitingContinueRef.current = !state.isResetting && state.endOfDayPhase === 'JANITOR_WAVING';
+  awaitingContinueRef.current = !state.isResetting && state.endOfDayPhase === "JANITOR_WAVING";
 
   return (
     <div className="min-h-screen bg-white font-sans">
@@ -327,12 +357,12 @@ export default function App() {
                 title="Press S to cycle speed"
               >
                 <div className="text-[9px] text-slate-500 uppercase tracking-wider">Speed</div>
-                <div className="text-sm font-bold text-blue-600">{speedLabelFor(state.speedMultiplier)}</div>
+                <div className="text-sm font-bold text-blue-600">
+                  {speedLabelFor(state.speedMultiplier)}
+                </div>
               </div>
               {state.isPaused && (
-                <Badge className="bg-slate-900 text-white font-mono px-3 py-1">
-                  PAUSED
-                </Badge>
+                <Badge className="bg-slate-900 text-white font-mono px-3 py-1">PAUSED</Badge>
               )}
             </div>
 
@@ -342,14 +372,16 @@ export default function App() {
                 <Button
                   variant="outline"
                   size="icon"
-                  aria-label={state.isPaused ? 'Resume' : 'Pause'}
-                  title={state.isPaused ? 'Resume (Space)' : 'Pause (Space)'}
+                  aria-label={state.isPaused ? "Resume" : "Pause"}
+                  title={state.isPaused ? "Resume (Space)" : "Pause (Space)"}
                   className="h-auto w-12 bg-white/90 backdrop-blur-sm border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
                   onClick={togglePause}
                 >
-                  {state.isPaused
-                    ? <Play className="w-5 h-5" fill="currentColor" />
-                    : <Pause className="w-5 h-5" fill="currentColor" />}
+                  {state.isPaused ? (
+                    <Play className="w-5 h-5" fill="currentColor" />
+                  ) : (
+                    <Pause className="w-5 h-5" fill="currentColor" />
+                  )}
                 </Button>
                 <div className="text-3xl font-mono font-bold text-slate-800 bg-white/90 backdrop-blur-sm px-3 py-1.5 border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)]">
                   {formatTime(state.time)}
@@ -361,8 +393,12 @@ export default function App() {
                 </Badge>
               )}
               {(() => {
-                const employeeCount = state.npcs.filter(n => n.npcType === 'EMPLOYEE' && n.state !== 'AWAY').length;
-                const guestCount = state.npcs.filter(n => n.npcType === 'GUEST' && n.state !== 'AWAY').length;
+                const employeeCount = state.npcs.filter(
+                  (n) => n.npcType === "EMPLOYEE" && n.state !== "AWAY"
+                ).length;
+                const guestCount = state.npcs.filter(
+                  (n) => n.npcType === "GUEST" && n.state !== "AWAY"
+                ).length;
                 return (
                   <div className="bg-white/90 backdrop-blur-sm border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] font-mono text-xs px-3 py-1.5 space-y-0.5">
                     <div className="flex justify-between gap-4">
