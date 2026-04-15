@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright 2026 Mapped Inc.
+# SPDX-License-Identifier: MIT
+# See LICENSE at the repository root for full license text.
+#
 # Regenerate docs/demo.gif from a fresh simulator run.
 #
 # Steps:

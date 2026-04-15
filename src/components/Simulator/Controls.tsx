@@ -1,3 +1,7 @@
+// Copyright 2026 Mapped Inc.
+// SPDX-License-Identifier: MIT
+// See LICENSE at the repository root for full license text.
+
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';

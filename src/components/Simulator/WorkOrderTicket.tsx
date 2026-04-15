@@ -1,3 +1,7 @@
+// Copyright 2026 Mapped Inc.
+// SPDX-License-Identifier: MIT
+// See LICENSE at the repository root for full license text.
+
 import React from 'react';
 import { WorkOrder, WorkOrderPriority } from '@/types/sim';
 import { restroomLabel } from '@/simulation/workorder';

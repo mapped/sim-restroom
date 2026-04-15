@@ -1,3 +1,7 @@
+// Copyright 2026 Mapped Inc.
+// SPDX-License-Identifier: MIT
+// See LICENSE at the repository root for full license text.
+
 import { test } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';

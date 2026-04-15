@@ -1,7 +1,6 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+// Copyright 2026 Mapped Inc.
+// SPDX-License-Identifier: MIT
+// See LICENSE at the repository root for full license text.
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SimState, SimEvent, Room, NPCState } from '@/types/sim';

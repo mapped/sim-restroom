@@ -286,7 +286,7 @@ If any of that's interesting to your team, the best starting points are [mapped.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE) for the full text. (If a `LICENSE` file isn't in the repo yet, add one — the standard [MIT license text](https://opensource.org/license/mit) is fine.)
+MIT © 2026 Mapped Inc. See [`LICENSE`](LICENSE) for the full text. Every source file carries an `SPDX-License-Identifier: MIT` header.
 
 ## Contributing
 

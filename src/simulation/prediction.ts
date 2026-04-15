@@ -1,3 +1,7 @@
+// Copyright 2026 Mapped Inc.
+// SPDX-License-Identifier: MIT
+// See LICENSE at the repository root for full license text.
+
 import { SimEvent, RestroomStatus, RestroomPrediction, WorkOrder, ScheduledMeeting } from '@/types/sim';
 import { SIM_CONFIG, JANITORIAL_RULES } from '@/simulation/config';
 import { createWorkOrder, emitWorkOrderCreated } from '@/simulation/workorder';

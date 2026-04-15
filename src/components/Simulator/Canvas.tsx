@@ -1,3 +1,7 @@
+// Copyright 2026 Mapped Inc.
+// SPDX-License-Identifier: MIT
+// See LICENSE at the repository root for full license text.
+
 import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import { SimState, Room, RoomType, NPC, RestroomStatus, RestroomPrediction, ScheduledMeeting, WorkOrder } from '@/types/sim';
 import { JANITORIAL_RULES } from '@/simulation/engine';

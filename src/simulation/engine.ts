@@ -1,3 +1,7 @@
+// Copyright 2026 Mapped Inc.
+// SPDX-License-Identifier: MIT
+// See LICENSE at the repository root for full license text.
+
 import { Room, RoomType, NPC, NPCState, Point, SimState, SimEvent, ScheduledMeeting, WorkOrder, RestroomStatus, RestroomPrediction } from '@/types/sim';
 import { SIM_CONFIG, MEETING_RULES, JANITORIAL_RULES, LIFECYCLE_RULES } from '@/simulation/config';
 import { computePredictions, maybeCreatePreemptiveWorkOrders } from '@/simulation/prediction';

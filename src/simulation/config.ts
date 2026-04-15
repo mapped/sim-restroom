@@ -1,3 +1,7 @@
+// Copyright 2026 Mapped Inc.
+// SPDX-License-Identifier: MIT
+// See LICENSE at the repository root for full license text.
+
 // ============================================================================
 // CONFIGURATION — All tunable rules in one place
 // Shared by engine.ts and prediction.ts (avoids circular imports)
