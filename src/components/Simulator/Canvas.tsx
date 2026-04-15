@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useMemo } from 'react';
-import { SimState, Room, RoomType, NPC, RestroomStatus, RestroomPrediction } from '@/types/sim';
+import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
+import { SimState, Room, RoomType, NPC, RestroomStatus, RestroomPrediction, ScheduledMeeting, WorkOrder } from '@/types/sim';
 import { JANITORIAL_RULES } from '@/simulation/engine';
+import { WorkOrderTicket } from '@/components/Simulator/WorkOrderTicket';
 
 interface RendererProps {
   state: SimState;
@@ -44,11 +45,45 @@ function computeViewBounds(rooms: Room[]) {
 
 export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [canvasWidth, setCanvasWidth] = useState<number>(1200);
+  const [hover, setHover] = useState<{ roomId: string; sx: number; sy: number } | null>(null);
 
   // Compute projected bounds once (rooms don't move)
   const bounds = useMemo(() => computeViewBounds(state.rooms), [state.rooms]);
   const contentWidth = bounds.maxPx - bounds.minPx + PADDING * 2;
   const contentHeight = bounds.maxPy - bounds.minPy + PADDING * 2;
+
+  // Projection params — kept in sync with the draw() transform so HTML
+  // overlays can position themselves over world-space coordinates.
+  const proj = useMemo(() => {
+    const scale = Math.min(canvasWidth / contentWidth, contentHeight > 0 ? 1 : 1, 1);
+    const scaledWidth = contentWidth * scale;
+    const scaledHeight = contentHeight * scale;
+    const offsetX = (canvasWidth - scaledWidth) / 2;
+    const offsetY = (contentHeight - scaledHeight) / 2;
+    const transX = PADDING - bounds.minPx;
+    const transY = PADDING - bounds.minPy;
+    return { scale, offsetX, offsetY, transX, transY };
+  }, [canvasWidth, contentWidth, contentHeight, bounds]);
+
+  const worldToScreen = useCallback((wx: number, wy: number) => {
+    const { px, py } = project(wx, wy);
+    return {
+      sx: (px + proj.transX) * proj.scale + proj.offsetX,
+      sy: (py + proj.transY) * proj.scale + proj.offsetY,
+    };
+  }, [proj]);
+
+  const screenToWorld = useCallback((sx: number, sy: number) => {
+    const px = (sx - proj.offsetX) / proj.scale - proj.transX;
+    const py = (sy - proj.offsetY) / proj.scale - proj.transY;
+    // Invert project(): px = (x-y)*TW/2, py = (x+y)*TH/2
+    return {
+      x: px / TILE_WIDTH + py / TILE_HEIGHT,
+      y: py / TILE_HEIGHT - px / TILE_WIDTH,
+    };
+  }, [proj]);
 
   const draw = () => {
     const canvas = canvasRef.current;
@@ -371,6 +406,7 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
       const w = 12 * npc.size;
       const isJanitor = npc.npcType === 'JANITOR';
       const isGuest = npc.npcType === 'GUEST';
+      const isMeetingGuest = npc.npcType === 'MEETING_GUEST';
 
       // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
@@ -399,6 +435,16 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
         ctx.strokeRect(px - w / 3, py + TILE_HEIGHT / 2 - h + 6, (w * 2) / 3, 5);
       }
 
+      // Meeting Guest: badge collar line at neckline
+      if (isMeetingGuest) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px - w / 2, py + TILE_HEIGHT / 2 - h);
+        ctx.lineTo(px + w / 2, py + TILE_HEIGHT / 2 - h);
+        ctx.stroke();
+      }
+
       // Head
       ctx.fillStyle = npc.skinColor;
       ctx.beginPath();
@@ -411,6 +457,31 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
         ctx.fillRect(px - w / 2 - 1, py + TILE_HEIGHT / 2 - h - w / 2 - w / 2 - 2, w + 2, 4);
       }
 
+      // Meeting Guest: visitor lanyard and diamond badge
+      if (isMeetingGuest) {
+        const neckX = px;
+        const neckY = py + TILE_HEIGHT / 2 - h - w / 2 + w / 2; // bottom of head
+        // Lanyard cord
+        ctx.strokeStyle = '#374151';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(neckX, neckY);
+        ctx.lineTo(neckX, neckY + 6);
+        ctx.stroke();
+        // Diamond badge
+        ctx.fillStyle = npc.color;
+        ctx.strokeStyle = '#1f2937';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(neckX, neckY + 6);      // top
+        ctx.lineTo(neckX + 3, neckY + 9);  // right
+        ctx.lineTo(neckX, neckY + 12);     // bottom
+        ctx.lineTo(neckX - 3, neckY + 9);  // left
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+
       // Eyes
       ctx.fillStyle = '#000000';
       const eyeOffset = npc.targetX > npc.x ? 2 : -2;
@@ -419,8 +490,8 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
       ctx.arc(px + eyeOffset + 2, py + TILE_HEIGHT / 2 - h - w / 2, 1, 0, Math.PI * 2);
       ctx.fill();
 
-      // Urgency indicator (employees only)
-      if (!isJanitor && npc.restroomUrgency > 0.5) {
+      // Urgency indicator (employees only, not janitors or meeting guests)
+      if (!isJanitor && !isMeetingGuest && npc.restroomUrgency > 0.5) {
         const pulse = Math.sin(Date.now() / 150) * 3;
         ctx.fillStyle = npc.restroomUrgency > 0.8 ? '#ef4444' : '#f59e0b';
         ctx.beginPath();
@@ -446,8 +517,10 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
   useEffect(() => {
     const handleResize = () => {
       if (canvasRef.current) {
-        canvasRef.current.width = canvasRef.current.parentElement?.clientWidth || 1200;
+        const w = canvasRef.current.parentElement?.clientWidth || 1200;
+        canvasRef.current.width = w;
         canvasRef.current.height = Math.round(contentHeight);
+        setCanvasWidth(w);
       }
     };
     window.addEventListener('resize', handleResize);
@@ -455,14 +528,91 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [contentHeight]);
 
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    // Map CSS px to internal canvas coords (width might be stretched by CSS).
+    const sx = ((e.clientX - rect.left) / rect.width) * canvas.width;
+    const sy = ((e.clientY - rect.top) / rect.height) * canvas.height;
+    const { x, y } = screenToWorld(sx, sy);
+    const room = state.rooms.find(r =>
+      r.type === RoomType.MEETING_ROOM &&
+      x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+    );
+    if (room) {
+      setHover({ roomId: room.id, sx: e.clientX - rect.left, sy: e.clientY - rect.top });
+    } else if (hover) {
+      setHover(null);
+    }
+  }, [screenToWorld, state.rooms, hover]);
+
+  const handleMouseLeave = useCallback(() => setHover(null), []);
+
   useEffect(() => {
     const frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
   }, [state]);
 
+  // Janitor closet screen anchor — top-center used for stacking work order tickets
+  const closet = state.rooms.find(r => r.id === JANITORIAL_RULES.janitorClosetId);
+  const closetAnchor = closet
+    ? worldToScreen(closet.x + closet.width / 2, closet.y)
+    : null;
+
+  // Active + recently completed work orders, newest first
+  const visibleOrders = state.workOrders
+    .filter(wo => wo.status !== 'COMPLETED' || (wo.completedAt != null && state.time - wo.completedAt < 2))
+    .slice(-4)
+    .reverse();
+
+  const hoveredRoom = hover ? state.rooms.find(r => r.id === hover.roomId) : null;
+  const hoveredMeetings = hover
+    ? state.meetings
+        .filter(m => m.roomId === hover.roomId)
+        .sort((a, b) => a.startTime - b.startTime)
+    : [];
+
   return (
-    <div className="w-full relative">
-      <canvas ref={canvasRef} className="w-full image-pixelated" style={{ height: contentHeight }} />
+    <div ref={containerRef} className="w-full relative">
+      <canvas
+        ref={canvasRef}
+        className="w-full image-pixelated"
+        style={{ height: contentHeight }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      />
+
+      {/* Meeting room hover tooltip — today's schedule for that room */}
+      {hover && hoveredRoom && (
+        <MeetingTooltip
+          anchorX={hover.sx}
+          anchorY={hover.sy}
+          roomLabel={(hoveredRoom.label || '').split(' (')[0].split(' [')[0]}
+          meetings={hoveredMeetings}
+          currentTime={state.time}
+        />
+      )}
+
+      {/* CMMS work order tickets stacked above the janitor closet */}
+      {closetAnchor && visibleOrders.length > 0 && (
+        <div
+          className="absolute pointer-events-none flex flex-col-reverse gap-1.5"
+          style={{
+            // Anchor the stack just above the closet and extend rightward.
+            // The closet sits in the far-left corner of the isometric view,
+            // so centering would push tickets off-screen.
+            left: closetAnchor.sx - 10,
+            top: closetAnchor.sy - 12,
+            transform: 'translateY(-100%)',
+          }}
+        >
+          {visibleOrders.map((wo, i) => (
+            <WorkOrderTicket key={wo.id} wo={wo} now={state.time} isNew={i === 0} />
+          ))}
+        </div>
+      )}
+
       {state.isResetting && (
         <div className="absolute inset-0 bg-white flex items-center justify-center animate-in fade-in duration-1000">
           <div className="text-slate-900 font-mono text-2xl animate-pulse">
@@ -470,6 +620,93 @@ export const IsometricRenderer: React.FC<RendererProps> = ({ state }) => {
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// ============================================================================
+// Meeting schedule tooltip — appears on hover over a meeting room
+// ============================================================================
+
+function formatRange(start: number, end: number): string {
+  const fmt = (t: number) => {
+    const h = Math.floor(t / 60), m = Math.floor(t % 60);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${h % 12 || 12}:${m.toString().padStart(2, '0')}${ampm === 'PM' ? 'p' : 'a'}`;
+  };
+  return `${fmt(start)}–${fmt(end)}`;
+}
+
+interface MeetingTooltipProps {
+  anchorX: number;
+  anchorY: number;
+  roomLabel: string;
+  meetings: ScheduledMeeting[];
+  currentTime: number;
+}
+
+const MeetingTooltip: React.FC<MeetingTooltipProps> = ({
+  anchorX, anchorY, roomLabel, meetings, currentTime,
+}) => {
+  return (
+    <div
+      className="absolute pointer-events-none z-20 bg-white border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] font-mono"
+      style={{
+        left: anchorX + 14,
+        top: anchorY + 14,
+        width: 220,
+      }}
+    >
+      <div className="bg-slate-800 text-slate-100 px-2 py-0.5 flex items-center justify-between">
+        <span className="text-[9px] tracking-[0.15em] font-bold">TODAY&apos;S SCHEDULE</span>
+        <span className="text-[9px] text-slate-400">ROOM</span>
+      </div>
+      <div className="px-2 py-1 border-b border-slate-300 text-[11px] font-bold text-slate-900">
+        {roomLabel}
+      </div>
+      <div className="p-1 max-h-[240px] overflow-y-auto">
+        {meetings.length === 0 && (
+          <div className="text-[10px] text-slate-500 italic px-1 py-1">No meetings scheduled</div>
+        )}
+        {meetings.map(m => {
+          const isPast = currentTime >= m.endTime;
+          const isActive = currentTime >= m.startTime && currentTime < m.endTime;
+          const attendees = m.attendeeIds.length;
+          const guests = m.guestIds?.length ?? 0;
+          return (
+            <div
+              key={m.id}
+              className={[
+                'flex items-center justify-between gap-2 px-1 py-1 text-[10px] border-b last:border-b-0 border-slate-200',
+                isPast ? 'opacity-40 line-through' : '',
+                isActive ? 'bg-blue-50' : '',
+              ].join(' ')}
+            >
+              <div className="flex flex-col">
+                <span className={`font-bold ${isActive ? 'text-blue-700' : 'text-slate-800'}`}>
+                  {formatRange(m.startTime, m.endTime)}
+                </span>
+                <span className="text-[9px] text-slate-500">{m.id}</span>
+              </div>
+              <div className="flex items-center gap-1 text-[9px]">
+                <span title="attendees" className="bg-slate-200 text-slate-700 px-1 border border-slate-400">
+                  {attendees}
+                </span>
+                {guests > 0 && (
+                  <span title="guests" className="bg-orange-100 text-orange-700 px-1 border border-orange-400">
+                    +{guests}
+                  </span>
+                )}
+                {isActive && (
+                  <span className="bg-blue-300 text-blue-900 px-1 border border-blue-600 font-bold animate-pulse">
+                    NOW
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };

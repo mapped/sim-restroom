@@ -126,6 +126,16 @@ export const Controls: React.FC<ControlsProps> = ({
                   <span className="text-slate-300 ml-auto">
                     EMP:{e.employeeCount} · GST:{e.guestCount}
                   </span>
+                ) : e.type === 'WORK_ORDER_CREATED' ? (
+                  <>
+                    <span className="text-yellow-300 font-bold">
+                      WO-{String(e.workOrderDailyNumber ?? 0).padStart(3, '0')}
+                    </span>
+                    <span className="text-blue-400">{e.restroomId}</span>
+                    <span className="text-slate-400 truncate ml-auto" title={e.reasonDetail}>
+                      {e.reasonDetail}
+                    </span>
+                  </>
                 ) : (
                   <>
                     <span className="text-slate-300 truncate max-w-[60px]">{e.npcId}</span>

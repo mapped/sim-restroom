@@ -1,5 +1,6 @@
-import { SimEvent, RestroomStatus, RestroomPrediction, WorkOrder } from '@/types/sim';
+import { SimEvent, RestroomStatus, RestroomPrediction, WorkOrder, ScheduledMeeting } from '@/types/sim';
 import { SIM_CONFIG, JANITORIAL_RULES } from '@/simulation/config';
+import { createWorkOrder, emitWorkOrderCreated } from '@/simulation/workorder';
 
 // ============================================================================
 // PREDICTION MODEL — Two-layer calendar-aware usage forecasting
@@ -61,13 +62,36 @@ function computeBaseRate(
 }
 
 /**
+ * Compute extra usage rate contributed by post-meeting restroom surges.
+ * Each meeting whose 10-minute post-meeting window overlaps currentTime
+ * contributes based on attendee + guest count.
+ */
+function computeMeetingSurgeRate(
+  currentTime: number,
+  meetings: ScheduledMeeting[],
+): number {
+  const SURGE_WINDOW = 10; // minutes after meeting end
+  const RATE_PER_PERSON = 0.08; // uses per minute per restroom per person
+
+  let total = 0;
+  for (const m of meetings) {
+    if (currentTime >= m.endTime && currentTime < m.endTime + SURGE_WINDOW) {
+      const size = m.attendeeIds.length + (m.guestIds?.length ?? 0);
+      total += size * RATE_PER_PERSON;
+    }
+  }
+  return total;
+}
+
+/**
  * Predict when usage will hit the cleaning threshold, accounting for
- * calendar-based surge events (all-hands meeting).
+ * calendar-based surge events (all-hands meeting and scheduled meetings).
  */
 function predictThresholdTime(
   usageCount: number,
   baseRate: number,
   currentTime: number,
+  meetings: ScheduledMeeting[],
 ): number | null {
   const remaining = JANITORIAL_RULES.cleaningThreshold - usageCount;
   if (remaining <= 0) return currentTime; // already at threshold
@@ -85,6 +109,9 @@ function predictThresholdTime(
       rate = Math.max(rate, SURGE_RATE);
     }
 
+    // Apply meeting-based surge
+    rate += computeMeetingSurgeRate(t, meetings);
+
     accumulated += rate * step;
     t += step;
   }
@@ -97,11 +124,14 @@ function predictThresholdTime(
  * Determine when to dispatch the janitor for pre-emptive cleaning.
  * The magic: if all-hands is upcoming and threshold will be hit during/after
  * the post-meeting surge, clean DURING the meeting when restrooms are empty.
+ * Also: if a large scheduled meeting is upcoming and the threshold is predicted
+ * near that meeting, clean during the meeting when restrooms are likely empty.
  */
 function computeSuggestedCleanTime(
   predictedThresholdTime: number | null,
   usageCount: number,
   currentTime: number,
+  meetings: ScheduledMeeting[],
 ): number | null {
   if (!predictedThresholdTime) return null;
 
@@ -119,6 +149,19 @@ function computeSuggestedCleanTime(
     return SIM_CONFIG.ALL_HANDS_TIME + 1;
   }
 
+  // Meeting-based early clean: if threshold predicted during/near a large meeting,
+  // clean during that meeting when restroom attendance is likely low
+  const largeMeeting = meetings.find(m => {
+    const size = m.attendeeIds.length + (m.guestIds?.length ?? 0);
+    return size >= 4 &&
+      currentTime < m.startTime &&
+      predictedThresholdTime >= m.startTime - 5 &&
+      predictedThresholdTime <= m.endTime + 20;
+  });
+  if (largeMeeting && usageCount >= JANITORIAL_RULES.cleaningThreshold * 0.4) {
+    return largeMeeting.startTime + 1; // clean during the meeting
+  }
+
   // Non-calendar scenario: dispatch early enough to finish before threshold
   const leadTime = JANITORIAL_RULES.cleaningDuration + TRAVEL_TIME + BUFFER_TIME;
   const suggested = predictedThresholdTime - leadTime;
@@ -129,11 +172,15 @@ function computeSuggestedCleanTime(
 
 /**
  * Main prediction function. Called each tick in predictive mode.
+ *
+ * NOTE: The call site in engine.ts must pass the `meetings` argument.
+ * The engine.ts agent is handling that update separately.
  */
 export function computePredictions(
   statuses: RestroomStatus[],
   eventHistory: SimEvent[],
   currentTime: number,
+  meetings: ScheduledMeeting[],
 ): RestroomPrediction[] {
   return statuses.map(status => {
     if (status.isBeingCleaned) {
@@ -152,19 +199,29 @@ export function computePredictions(
     );
 
     const predictedThresholdTime = predictThresholdTime(
-      status.usageCount, rate, currentTime
+      status.usageCount, rate, currentTime, meetings
     );
 
     // Surge is relevant only if: we're before the surge window, the threshold
     // is predicted to be hit around the surge, AND usage is significant enough
     // that the surge actually matters (not freshly cleaned).
-    const surgeExpected = currentTime < SURGE_END &&
+    const allHandsSurgeExpected = currentTime < SURGE_END &&
       predictedThresholdTime != null &&
       predictedThresholdTime >= SURGE_START - 30 &&
       status.usageCount >= JANITORIAL_RULES.cleaningThreshold * 0.3;
 
+    // Also flag surge if a large meeting ends in the next 30 minutes
+    const upcomingLargeMeeting = meetings.some(m => {
+      const size = m.attendeeIds.length + (m.guestIds?.length ?? 0);
+      return size >= 3 &&
+        m.endTime > currentTime &&
+        m.endTime <= currentTime + 30;
+    });
+
+    const surgeExpected = allHandsSurgeExpected || upcomingLargeMeeting;
+
     const suggestedCleanTime = computeSuggestedCleanTime(
-      predictedThresholdTime, status.usageCount, currentTime
+      predictedThresholdTime, status.usageCount, currentTime, meetings
     );
 
     return {
@@ -182,13 +239,13 @@ export function computePredictions(
  * Create pre-emptive work orders when the suggested clean time arrives.
  * Does not replace the reactive threshold system — augments it.
  */
-let preemptiveCounter = 0;
-
 export function maybeCreatePreemptiveWorkOrders(
   predictions: RestroomPrediction[],
   workOrders: WorkOrder[],
   statuses: RestroomStatus[],
   currentTime: number,
+  day: number,
+  meetings: ScheduledMeeting[],
   events: SimEvent[],
 ): WorkOrder[] {
   const updated = [...workOrders];
@@ -208,19 +265,21 @@ export function maybeCreatePreemptiveWorkOrders(
     );
     if (hasOrder) continue;
 
-    const wo: WorkOrder = {
-      id: `PWO-${++preemptiveCounter}`,
-      restroomId: pred.roomId,
-      createdAt: currentTime,
-      status: 'PENDING',
-    };
-    updated.push(wo);
-    events.push({
-      type: 'WORK_ORDER_CREATED',
-      restroomId: pred.roomId,
-      npcId: 'JAN-01',
-      timestamp: currentTime,
+    // Pick a reason: surge-driven dispatch vs. ETA-driven dispatch.
+    // If the suggested clean time aligns with a known meeting start (within a
+    // few minutes), treat it as a surge-mitigation work order.
+    const alignedMeeting = meetings.find(m =>
+      Math.abs(m.startTime - pred.suggestedCleanTime!) <= 3 &&
+      (m.attendeeIds.length + (m.guestIds?.length ?? 0)) >= 3
+    );
+    const reason = (pred.surgeExpected || alignedMeeting) ? 'PREDICTIVE_SURGE' : 'PREDICTIVE_ETA';
+
+    const wo = createWorkOrder(pred.roomId, reason, currentTime, day, {
+      thresholdTime: pred.predictedThresholdTime,
+      meetingTime: alignedMeeting?.startTime ?? null,
     });
+    updated.push(wo);
+    emitWorkOrderCreated(events, wo, currentTime);
   }
 
   return updated;

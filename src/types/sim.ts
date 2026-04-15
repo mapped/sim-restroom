@@ -44,7 +44,8 @@ export enum NPCState {
 export interface NPC {
   id: string;
   name: string;
-  npcType?: 'EMPLOYEE' | 'JANITOR' | 'GUEST'; // defaults to EMPLOYEE
+  npcType?: 'EMPLOYEE' | 'JANITOR' | 'GUEST' | 'MEETING_GUEST'; // defaults to EMPLOYEE
+  meetingId?: string;       // For MEETING_GUEST: which ScheduledMeeting they belong to
   x: number;
   y: number;
   targetX: number;
@@ -66,17 +67,36 @@ export interface NPC {
 }
 
 export interface ScheduledMeeting {
+  id: string;             // unique meeting ID, e.g. "MTG-001"
   roomId: string;
   startTime: number;      // sim minutes from midnight
   endTime: number;        // sim minutes from midnight
-  attendeeIds: string[];  // NPC IDs assigned to this meeting
+  attendeeIds: string[];  // Employee NPC IDs assigned to this meeting
+  guestIds?: string[];    // MEETING_GUEST NPC IDs (external visitors)
+  hasGuests: boolean;     // true if this meeting was scheduled with external guests
 }
 
+export type WorkOrderReason =
+  | 'THRESHOLD_REACHED'       // reactive: usage hit cleaning threshold
+  | 'SCHEDULED_DAILY'         // non-predictive: 5 PM daily cleaning
+  | 'PREDICTIVE_SURGE'        // predictive: upcoming all-hands/meeting surge
+  | 'PREDICTIVE_ETA';         // predictive: usage rate will breach threshold soon
+
+export type WorkOrderPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
 export interface WorkOrder {
-  id: string;              // e.g. "WO-001"
-  restroomId: string;      // which restroom needs cleaning
-  createdAt: number;       // sim time when created
+  id: string;                  // e.g. "WO-001" (unique across the run)
+  dailyNumber: number;         // sequential per-day (resets each new day)
+  restroomId: string;          // which restroom needs cleaning
+  createdAt: number;           // sim time when created
   status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+  startedAt?: number;          // sim time when IN_PROGRESS began
+  completedAt?: number;        // sim time when COMPLETED
+  title: string;               // short work summary, e.g. "Restroom cleaning"
+  description: string;         // longer human-readable work description
+  reason: WorkOrderReason;
+  reasonDetail: string;        // plain-english reason (for tickets + event log)
+  priority: WorkOrderPriority;
 }
 
 export interface RestroomStatus {
@@ -100,7 +120,7 @@ export interface SimState {
   day: number;
   npcs: NPC[];
   rooms: Room[];
-  meetings: ScheduledMeeting[];
+  meetings: ScheduledMeeting[];       // Daily fixed schedule (generated at day start)
   workOrders: WorkOrder[];
   restroomStatuses: RestroomStatus[];
   predictions: RestroomPrediction[];
@@ -108,6 +128,7 @@ export interface SimState {
   speedMultiplier: number;
   preCleaningSpeed?: number; // speed to restore after cleaning slowdown
   isResetting: boolean;
+  dailyScheduleDay?: number;           // Which day the current schedule was generated for
 }
 
 export type SimEvent = {
@@ -117,4 +138,10 @@ export type SimEvent = {
   timestamp: number;
   employeeCount?: number;   // for OCCUPANCY_COUNT
   guestCount?: number;      // for OCCUPANCY_COUNT
+  // For WORK_ORDER_CREATED:
+  workOrderId?: string;
+  workOrderDailyNumber?: number;
+  reason?: WorkOrderReason;
+  reasonDetail?: string;
+  priority?: WorkOrderPriority;
 };
