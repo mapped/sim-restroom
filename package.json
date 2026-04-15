@@ -1,16 +1,48 @@
 {
   "name": "mapped-restroom-sim",
-  "private": true,
   "version": "1.0.0",
+  "description": "Isometric office simulator demonstrating conditions-based restroom maintenance with IoT traffic sensors, predictive work-order dispatch, and a CMMS-style UI.",
+  "license": "MIT",
+  "author": "Mapped Inc. (https://mapped.com)",
+  "homepage": "https://github.com/mapped/sim-restroom#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mapped/sim-restroom.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mapped/sim-restroom/issues"
+  },
+  "keywords": [
+    "simulator",
+    "iot",
+    "predictive-maintenance",
+    "conditions-based-maintenance",
+    "cmms",
+    "facility-management",
+    "restroom",
+    "canvas",
+    "isometric",
+    "react",
+    "vite",
+    "demo"
+  ],
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit",
-    "test": "npx playwright test",
-    "test:ui": "npx playwright test --ui"
+    "lint": "npm run lint:types && npm run lint:js",
+    "lint:types": "tsc --noEmit",
+    "lint:js": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npx playwright test --grep-invert capture-demo-gif",
+    "test:ui": "npx playwright test --ui",
+    "demo:gif": "./scripts/generate-demo-gif.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",
@@ -28,8 +60,15 @@
     "vite": "^6.2.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@playwright/test": "^1.59.1",
     "@types/node": "^22.14.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.0",
+    "prettier": "^3.3.0",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2"
   }

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+blob-report/
+package-lock.json
+tests/app.spec.ts-snapshots/
+docs/demo.gif
+docs/Conditions-Based Restroom Maintenance.md
