@@ -98,7 +98,7 @@ export const INITIAL_ROOMS: Room[] = [
   { id: 'MEET-001', type: RoomType.MEETING_ROOM, x: 2, y: 24, width: 6, height: 4, label: 'Meeting A', capacity: 6, occupancy: [], door: { x: 8, y: 26 } },
   { id: 'MEET-002', type: RoomType.MEETING_ROOM, x: 2, y: 30, width: 6, height: 4, label: 'Meeting B', capacity: 6, occupancy: [], door: { x: 8, y: 32 } },
   { id: 'JAN-CLOSET', type: RoomType.JANITOR_CLOSET, x: 2, y: 36, width: 2, height: 2, label: 'Janitor', capacity: 1, occupancy: [], door: { x: 4, y: 37 } },
-  { id: 'LOBBY', type: RoomType.LOBBY, x: 23, y: 37, width: 4, height: 2, label: 'Entrance', capacity: 0, occupancy: [], door: { x: 25, y: 37 } },
+  { id: 'LOBBY', type: RoomType.LOBBY, x: 22, y: 38, width: 5, height: 2, label: 'Entrance', capacity: 0, occupancy: [], door: { x: 24, y: 38 } },
 ];
 
 // ============================================================================
@@ -557,8 +557,13 @@ function processNPC(
 
   // --- 0. AWAY state: check if it's time to arrive ---
   if (n.state === NPCState.AWAY) {
-    if (n.arrivalTime != null && ctx.newTime >= n.arrivalTime) {
-      // Spawn at entrance and walk to desk
+    // Only spawn if we're within the work window: arrived but not yet departed
+    const shouldBeInBuilding =
+      n.arrivalTime != null &&
+      ctx.newTime >= n.arrivalTime &&
+      (n.departureTime == null || ctx.newTime < n.departureTime);
+
+    if (shouldBeInBuilding) {
       n.x = LIFECYCLE_RULES.entryPoint.x;
       n.y = LIFECYCLE_RULES.entryPoint.y;
       n.isExiting = false;
@@ -654,8 +659,17 @@ function processNPC(
             flashes.set(target.id, { color: 'red', timer: 1000 });
           }
           n.targetRoomId = undefined; n.leaveTime = undefined;
-          const dest = decidePostExitDestination(n, registry, roomsById, meetings, restroomStatuses, ctx);
-          sendToRoom(n, dest, roomsById);
+
+          // If exiting the building, head to entry point (don't route to another room)
+          if (n.isExiting) {
+            n.targetX = LIFECYCLE_RULES.entryPoint.x;
+            n.targetY = LIFECYCLE_RULES.entryPoint.y;
+            n.state = NPCState.WALKING;
+            n.path = findPath({ x: n.x, y: n.y }, LIFECYCLE_RULES.entryPoint);
+          } else {
+            const dest = decidePostExitDestination(n, registry, roomsById, meetings, restroomStatuses, ctx);
+            sendToRoom(n, dest, roomsById);
+          }
 
         } else if (currentRoomId == null || currentRoomId.startsWith('DESK')) {
           // ── ENTER ──
@@ -868,7 +882,24 @@ export function updateSimulation(
     console.error('REGISTRY VALIDATION FAILED at time', newTime);
   }
 
-  // 5. Build final rooms with labels showing usage count
+  // Emit OCCUPANCY_COUNT event when employee/guest counts change
+  const prevEmployees = state.npcs.filter(n => n.npcType === 'EMPLOYEE' && n.state !== NPCState.AWAY).length;
+  const prevGuests = state.npcs.filter(n => n.npcType === 'GUEST' && n.state !== NPCState.AWAY).length;
+  const currEmployees = updatedNPCs.filter(n => n.npcType === 'EMPLOYEE' && n.state !== NPCState.AWAY).length;
+  const currGuests = updatedNPCs.filter(n => n.npcType === 'GUEST' && n.state !== NPCState.AWAY).length;
+
+  if (currEmployees !== prevEmployees || currGuests !== prevGuests) {
+    collectedEvents.push({
+      type: 'OCCUPANCY_COUNT',
+      restroomId: 'OFFICE',
+      npcId: '',
+      timestamp: newTime,
+      employeeCount: currEmployees,
+      guestCount: currGuests,
+    });
+  }
+
+  // Build final rooms with labels showing usage count
   const finalRooms = state.rooms.map(room => {
     let flashTimer = Math.max(0, (room.flashTimer || 0) - deltaTime);
     let flashColor: Room['flashColor'] = flashTimer > 0 ? room.flashColor ?? null : null;

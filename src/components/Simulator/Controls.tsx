@@ -25,6 +25,7 @@ const EVENT_BADGE_STYLES: Record<string, string> = {
   WORK_ORDER_CREATED: 'border-yellow-500 text-yellow-400',
   CLEANING_STARTED: 'border-orange-500 text-orange-400',
   CLEANING_COMPLETED: 'border-emerald-500 text-emerald-400',
+  OCCUPANCY_COUNT: 'border-blue-500 text-blue-400',
 };
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -121,8 +122,16 @@ export const Controls: React.FC<ControlsProps> = ({
                 <Badge variant="outline" className={`text-[8px] py-0 h-4 ${EVENT_BADGE_STYLES[e.type] || 'border-slate-500 text-slate-400'}`}>
                   {e.type.replace(/_/g, ' ')}
                 </Badge>
-                <span className="text-slate-300 truncate max-w-[60px]">{e.npcId}</span>
-                <span className="text-blue-400 ml-auto">{e.restroomId}</span>
+                {e.type === 'OCCUPANCY_COUNT' ? (
+                  <span className="text-slate-300 ml-auto">
+                    EMP:{e.employeeCount} · GST:{e.guestCount}
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-slate-300 truncate max-w-[60px]">{e.npcId}</span>
+                    <span className="text-blue-400 ml-auto">{e.restroomId}</span>
+                  </>
+                )}
               </div>
             ))}
           </div>

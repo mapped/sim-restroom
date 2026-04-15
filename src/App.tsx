@@ -258,6 +258,26 @@ export default function App() {
                   FAST FORWARD
                 </Badge>
               )}
+              {(() => {
+                const employeeCount = state.npcs.filter(n => n.npcType === 'EMPLOYEE' && n.state !== 'AWAY').length;
+                const guestCount = state.npcs.filter(n => n.npcType === 'GUEST' && n.state !== 'AWAY').length;
+                return (
+                  <div className="bg-white/90 backdrop-blur-sm border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] font-mono text-xs px-3 py-1.5 space-y-0.5">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-600">EMPLOYEES</span>
+                      <span className="font-bold text-slate-900">{employeeCount}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-600">GUESTS</span>
+                      <span className="font-bold text-yellow-600">{guestCount}</span>
+                    </div>
+                    <div className="flex justify-between gap-4 border-t border-slate-300 pt-0.5">
+                      <span className="text-slate-600">TOTAL</span>
+                      <span className="font-bold text-blue-600">{employeeCount + guestCount}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

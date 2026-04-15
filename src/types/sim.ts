@@ -111,8 +111,10 @@ export interface SimState {
 }
 
 export type SimEvent = {
-  type: 'ENTER' | 'EXIT' | 'WORK_ORDER_CREATED' | 'CLEANING_STARTED' | 'CLEANING_COMPLETED';
-  restroomId: string;
+  type: 'ENTER' | 'EXIT' | 'WORK_ORDER_CREATED' | 'CLEANING_STARTED' | 'CLEANING_COMPLETED' | 'OCCUPANCY_COUNT';
+  restroomId: string;       // also used for roomId/location ID
   npcId: string;
   timestamp: number;
+  employeeCount?: number;   // for OCCUPANCY_COUNT
+  guestCount?: number;      // for OCCUPANCY_COUNT
 };
