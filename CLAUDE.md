@@ -10,7 +10,7 @@ An isometric office simulator that demos how **traffic sensors in restrooms** ca
 npm run dev       # Start Vite dev server on localhost:3000 (HMR enabled)
 npm run build     # Production build to dist/
 npm run lint      # TypeScript type-check (tsc --noEmit)
-npm test          # Run Playwright tests (12 tests, uses Chromium)
+npm test          # Run Playwright tests (uses Chromium)
 npm run test:ui   # Playwright interactive UI mode
 ```
 
@@ -63,21 +63,26 @@ Decision priority: All-hands > Restroom (urgency > 80%) > Assigned meeting > Ran
 
 ### Meeting Scheduler
 
-`scheduleMeetings()` runs at the start of each tick, before NPC processing:
-1. Removes expired meetings
-2. For each room with no active/upcoming meeting, schedules one at the next 5-min boundary
-3. Picks 2-4 random available NPCs (at desk, not assigned elsewhere)
-4. Durations are randomly 5 or 15 minutes
+`generateDailyMeetingSchedule()` runs once per day and produces the full day's meeting slate up front (rather than reactively at each tick). For each meeting room, it walks 30-min slots from 9 AM to 5 PM, picks a duration from `[15, 30, 45, 60]` minutes, selects 2–4 available attendees, and optionally attaches 1–3 external `MEETING_GUEST` NPCs (85% chance per meeting). `MEETING_GUEST`s spawn a few minutes before the meeting start and despawn after.
 
-Config lives in `MEETING_RULES` at the top of engine.ts. All tunables (attendee count, durations, boundary interval, room IDs) are in one place.
+Config lives in `MEETING_RULES` in `src/simulation/config.ts`. Tunables: `attendeesMin/Max`, `durations`, `slotInterval`, `meetingWindowStart/End`, `emptySlotProbability`, `roomIds`, and guest settings (`guestProbability`, `guestCountMin/Max`, `guestArrivalLeadTime`).
 
 ### Janitorial / Work Order System
 
 The core demo feature. Two modes controlled by a live toggle (`predictiveMode` in SimState):
 
-**Predictive mode** (default): `updateRestroomStatuses()` counts ENTER events per restroom. At 20 uses, creates a `WorkOrder` (PENDING). At 25 uses without cleaning, a sad face emoji renders on the floor.
+**Predictive mode** (default): `updateRestroomStatuses()` counts ENTER events per restroom. At 20 uses, creates a `WorkOrder` (PENDING). At 25 uses without cleaning, a sad face emoji renders on the floor. The prediction layer in `prediction.ts` can also create *pre-emptive* work orders with reason `PREDICTIVE_SURGE` / `PREDICTIVE_ETA` ahead of forecasted spikes.
 
 **Scheduled mode**: `checkScheduledCleaning()` creates work orders for all restrooms at 5:00 PM regardless of usage.
+
+**Work order factory** (`src/simulation/workorder.ts`): Every work order — regardless of trigger — goes through `createWorkOrder()`. This module is the single source of truth for:
+- Sequential daily ID (`dailyNumber`, resets each new day)
+- Human-readable copy: `title`, `description`, `reasonDetail`, `priority` — generated from the `WorkOrderReason` enum (`THRESHOLD_REACHED` / `SCHEDULED_DAILY` / `PREDICTIVE_SURGE` / `PREDICTIVE_ETA`)
+- The `WORK_ORDER_CREATED` event payload (via `emitWorkOrderCreated`)
+
+This module was extracted because both `engine.ts` and `prediction.ts` create work orders; without it, the two would need to import each other (circular import).
+
+**CMMS work-order ticket** (`src/components/Simulator/WorkOrderTicket.tsx`): Active work orders render as CMMS-style ticket cards floating above the janitor closet. Design is inspired by Maximo/UpKeep/Fiix/ServiceNow FSM tickets: WO number + priority + status pills, task title, location pin, reason, opened timestamp, assignee. Tickets stack newest-on-top and fade shortly after completion.
 
 **Janitor NPC** (`processJanitorNPC()`): Completely separate from `processNPC()`. State machine:
 - IDLE at closet → picks oldest PENDING work order → walks to restroom
@@ -91,17 +96,31 @@ Config lives in `JANITORIAL_RULES` at the top of engine.ts.
 
 ### Event System
 
-`updateSimulation()` returns `{ nextState, events }`. Event types: `ENTER`, `EXIT`, `WORK_ORDER_CREATED`, `CLEANING_STARTED`, `CLEANING_COMPLETED`. They are dispatched outside the React setState updater via a `pendingEventsRef` (overwrite, not append) to prevent duplicates from React's double-invocation in StrictMode.
+`updateSimulation()` returns `{ nextState, events }`. Event types: `ENTER`, `EXIT`, `WORK_ORDER_CREATED`, `CLEANING_STARTED`, `CLEANING_COMPLETED`, `OCCUPANCY_COUNT`. They are dispatched outside the React setState updater via a `pendingEventsRef` (overwrite, not append) to prevent duplicates from React's double-invocation in StrictMode.
+
+`WORK_ORDER_CREATED` events carry the full work-order context — `workOrderId`, `workOrderDailyNumber`, `reason`, `reasonDetail`, `priority` — so the event log and any future integrations see the same payload the CMMS ticket renders.
+
+### Canvas HTML overlays
+
+`Canvas.tsx` exposes projection helpers (`worldToScreen`, `screenToWorld`) derived from the same scale + offset + translate parameters used in the canvas `draw()`. React-rendered HTML overlays (meeting tooltip, work-order tickets) position themselves in world space via these helpers. Mouse interactions use `screenToWorld` to hit-test rooms. When adding a new overlay, anchor it via `worldToScreen` rather than hardcoding pixel coordinates.
+
+### Meeting room hover tooltip
+
+Hovering any meeting room pops up the day's full schedule for that room (time ranges, attendee/guest counts, past meetings struck through, active meeting flagged `NOW`). Implemented via `onMouseMove` on the canvas → `screenToWorld` → hit test on `RoomType.MEETING_ROOM`.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/simulation/engine.ts` | Core engine: RoomRegistry, NPC processing, janitor processing, meeting scheduler, work order system, pathfinding, all config |
-| `src/types/sim.ts` | All TypeScript interfaces: NPC, Room, SimState, ScheduledMeeting, WorkOrder, RestroomStatus, SimEvent |
+| `src/simulation/engine.ts` | Core engine: RoomRegistry, NPC processing, janitor processing, meeting scheduler, work order dispatch, pathfinding |
+| `src/simulation/config.ts` | All tunable constants (`SIM_CONFIG`, `MEETING_RULES`, `JANITORIAL_RULES`, `LIFECYCLE_RULES`) |
+| `src/simulation/prediction.ts` | Predictive cleaning model: rolling usage rate, surge forecast, pre-emptive work order creation |
+| `src/simulation/workorder.ts` | Work-order factory — sequential daily ID, reason-based copy, `WORK_ORDER_CREATED` event payload. Shared by engine + prediction (avoids circular import) |
+| `src/types/sim.ts` | All TypeScript interfaces: NPC, Room, SimState, ScheduledMeeting, WorkOrder, RestroomStatus, SimEvent, WorkOrderReason, WorkOrderPriority |
 | `src/App.tsx` | React app shell: animation loop, state init, reset handlers, predictive toggle, layout |
-| `src/components/Simulator/Canvas.tsx` | Isometric canvas renderer with auto-fit bounds, cleaning overlays, sad face, janitor visuals |
-| `src/components/Simulator/Controls.tsx` | Settings panel, cleaning mode toggle, restroom status bars, event log |
+| `src/components/Simulator/Canvas.tsx` | Isometric canvas renderer with auto-fit bounds, world↔screen helpers, hover tooltip + work-order overlay anchoring |
+| `src/components/Simulator/WorkOrderTicket.tsx` | CMMS-style work-order ticket card rendered above the janitor closet |
+| `src/components/Simulator/Controls.tsx` | Settings panel, cleaning mode toggle, event log (reason-aware for WORK_ORDER rows) |
 | `AGENTS.md` | Simulation rules documentation (restroom, janitorial, meetings, all-hands, priorities) |
 
 ## Import Convention
@@ -143,6 +162,8 @@ Run `npm test -- --update-snapshots` after intentional visual changes.
 - **Janitor is separate from regular NPCs** — `processJanitorNPC()` is a completely different function, not a branch in `processNPC()`. The janitor has fundamentally different behavior (waiting at doors, sequential work orders).
 - **`isBeingCleaned` blocks entry, not capacity** — Restrooms have capacity 5, so the janitor alone doesn't fill them. The `isBeingCleaned` flag on `RestroomStatus` is the authoritative block, checked in `findAvailableRestroom()` and the NPC ENTER guard.
 - **Predictive toggle is live** — changing `predictiveMode` does not require a restart. Existing pending work orders remain.
+- **Don't create `WorkOrder`s inline** — always go through `createWorkOrder()` in `src/simulation/workorder.ts` so the daily ID, copy, and event payload stay consistent. Emit via `emitWorkOrderCreated()`.
+- **Beware engine ↔ prediction circular import** — both modules create work orders. The factory module (`workorder.ts`) is deliberately the low-level dependency; don't make it import from `engine.ts` or `prediction.ts`.
 
 ## Origin
 
